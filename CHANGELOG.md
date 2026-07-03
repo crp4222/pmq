@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0 (2026-07-03)
+
+* New: `positions(user)` and `event_markets(slug)` in the data layer; `event`
+  tool in the MCP server; `fee_rate(condition_id)` (authoritative per-market
+  taker rate from the exchange) and `cancel_order(order_id)` on the executor.
+* Trust: weekly live canary workflow (real-endpoint checks, auto-opens an
+  issue on drift), SECURITY.md, production receipt in the README,
+  docs/rounding-study.md (measured V2 rounding behavior).
+* Quality: ruff in CI, tests for the bot-template engine (34 tests total).
+
 ## 0.1.0 (2026-07-03)
 
 First release.
