@@ -81,9 +81,17 @@ def main(argv: list[str] | None = None) -> int:
     # 1. installed surface
     try:
         from py_clob_client_v2.client import ClobClient
-        from py_clob_client_v2.clob_types import MarketOrderArgsV2, OrderType
+        from py_clob_client_v2.clob_types import (
+            MarketOrderArgsV2,
+            OrderArgsV2,
+            OrderType,
+        )
 
-        from .executor import _EXPECTED_MARKET_ARGS, _EXPECTED_METHODS
+        from .executor import (
+            _EXPECTED_MARKET_ARGS,
+            _EXPECTED_METHODS,
+            _EXPECTED_ORDER_ARGS,
+        )
         drifts = []
         for name, params in _EXPECTED_METHODS.items():
             fn = getattr(ClobClient, name, None)
@@ -91,6 +99,8 @@ def main(argv: list[str] | None = None) -> int:
             drifts += [f"{name}.{p}" for p in params if p not in have]
         have = set(inspect.signature(MarketOrderArgsV2).parameters)
         drifts += [f"MarketOrderArgsV2.{p}" for p in _EXPECTED_MARKET_ARGS if p not in have]
+        have = set(inspect.signature(OrderArgsV2).parameters)
+        drifts += [f"OrderArgsV2.{p}" for p in _EXPECTED_ORDER_ARGS if p not in have]
         if not hasattr(OrderType, "FAK"):
             drifts.append("OrderType.FAK")
         all_ok &= check(not drifts, "installed py-clob-client-v2 matches the verified surface",

@@ -87,6 +87,8 @@ _EXPECTED_METHODS: dict[str, tuple[str, ...]] = {
 }
 _EXPECTED_MARKET_ARGS: tuple[str, ...] = (
     "token_id", "amount", "side", "price", "builder_code")
+_EXPECTED_ORDER_ARGS: tuple[str, ...] = (
+    "token_id", "price", "size", "side", "builder_code")
 
 
 class PolymarketExecutor:
@@ -176,6 +178,11 @@ class PolymarketExecutor:
         for p in _EXPECTED_MARKET_ARGS:
             if p not in have:
                 drifts.append(f"MarketOrderArgsV2 lost field {p}")
+        oargs = self._t["OrderArgs"]
+        have = set(inspect.signature(oargs).parameters)
+        for p in _EXPECTED_ORDER_ARGS:
+            if p not in have:
+                drifts.append(f"OrderArgsV2 lost field {p}")
         if not hasattr(self._t["OrderType"], "FAK"):
             drifts.append("OrderType.FAK missing")
         if drifts:

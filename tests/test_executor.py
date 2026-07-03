@@ -255,6 +255,19 @@ def test_introspection_guard_refuses_drifted_client():
         make(Drifted())
 
 
+def test_introspection_guard_covers_order_args_builder_code(monkeypatch):
+    # limit_gtc now depends on OrderArgsV2.builder_code; the guard must refuse
+    # a client whose OrderArgsV2 dropped it, not crash later at call time.
+    import py_clob_client_v2.clob_types as ct
+
+    class NoBuilderOrderArgs:
+        def __init__(self, token_id, price, size, side):
+            self.token_id, self.price, self.size, self.side = token_id, price, size, side
+    monkeypatch.setattr(ct, "OrderArgsV2", NoBuilderOrderArgs)
+    with pytest.raises(IntrospectionMismatch, match="OrderArgsV2 lost field builder_code"):
+        make(FakeClient())
+
+
 def test_reconcile_cancels_then_reports_truth():
     fc = FakeClient(trades=[{"side": "BUY", "size": "2", "price": "0.95"}],
                     open_orders=[])
