@@ -157,6 +157,20 @@ def best_bid_ask(book):
     return bb, bb_sz, ba, ba_sz
 
 
+def book_meta(book):
+    """Exchange metadata riding on the book response: per-market minimum
+    order size (shares), tick size, neg_risk flag, last trade price. Read
+    these from the live book instead of hardcoding exchange rules."""
+    b = book or {}
+    def _f(k):
+        try:
+            return float(b[k])
+        except (KeyError, TypeError, ValueError):
+            return None
+    return {"min_order_size": _f("min_order_size"), "tick_size": _f("tick_size"),
+            "neg_risk": b.get("neg_risk"), "last_trade_price": _f("last_trade_price")}
+
+
 def band_ask_depth_usd(book, lo, hi):
     """Total $ notional of asks resting within [lo, hi]."""
     asks = (book or {}).get("asks") or []

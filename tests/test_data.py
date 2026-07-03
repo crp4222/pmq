@@ -64,6 +64,15 @@ def test_resolved_winner():
     assert resolved_winner(None) is None
 
 
+def test_book_meta_reads_exchange_rules_from_the_book():
+    from pmq import book_meta
+    meta = book_meta({"min_order_size": "5", "tick_size": "0.001",
+                      "neg_risk": True, "last_trade_price": "0.123"})
+    assert meta == {"min_order_size": 5.0, "tick_size": 0.001,
+                    "neg_risk": True, "last_trade_price": 0.123}
+    assert book_meta(None)["min_order_size"] is None
+
+
 def test_book_inferred_winner():
     assert book_inferred_winner(0.95, 0.02) == "a"
     assert book_inferred_winner(0.02, 0.91) == "b"

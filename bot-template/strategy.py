@@ -35,14 +35,16 @@ def watchlist():
 
 
 def decide(pm, book_a, book_b, remaining_usd, side_held, state):
-    # Demo: once per market, buy 2$ of whichever outcome is quoted at or
+    # Demo: once per market, buy 5$ of whichever outcome is quoted at or
     # above 0.98 (a near-settled favorite). Textbook carry, usually a bad
-    # trade. Delete me.
+    # trade. Delete me. The 5$ keeps the demo above the typical per-market
+    # exchange minimum (min_order_size shares, read from the live book by
+    # the engine).
     if state.get("done"):
         return None
     for side_key, book in (("a", book_a), ("b", book_b)):
         _, _, ask, ask_sz = pmq.best_bid_ask(book)
-        if ask is not None and 0.98 <= ask <= 0.99 and ask_sz and ask_sz * ask >= 2:
+        if ask is not None and 0.98 <= ask <= 0.99 and ask_sz and ask_sz * ask >= 5:
             state["done"] = True
-            return (side_key, ask, min(2.0, remaining_usd))
+            return (side_key, ask, min(5.0, remaining_usd))
     return None

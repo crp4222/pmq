@@ -107,7 +107,8 @@ def book(token_id: str, depth_lo: float = 0.0, depth_hi: float = 1.0) -> dict:
         return {"error": "book unavailable"}
     bid, bid_sz, ask, ask_sz = data.best_bid_ask(b)
     return {"bid": bid, "bid_size": bid_sz, "ask": ask, "ask_size": ask_sz,
-            "ask_depth_usd_in_range": data.band_ask_depth_usd(b, depth_lo, depth_hi)}
+            "ask_depth_usd_in_range": data.band_ask_depth_usd(b, depth_lo, depth_hi),
+            **data.book_meta(b)}
 
 
 @mcp.tool()

@@ -8,14 +8,14 @@ Execution layer (keys stay local, nothing booked without exchange
 confirmation): PolymarketExecutor, Fill, OrderUncertain.
 """
 from .data import (FEE_RATES, band_ask_depth_usd, best_bid_ask,
-                   book_inferred_winner, fee, get_book, get_market, get_tape,
-                   http_get_json, parse_market, resolved_winner)
+                   book_inferred_winner, book_meta, fee, get_book, get_market,
+                   get_tape, http_get_json, parse_market, resolved_winner)
 from .exceptions import IntrospectionMismatch, OrderUncertain, PmqError
 
 __version__ = "0.1.0"
 __all__ = [
     "FEE_RATES", "band_ask_depth_usd", "best_bid_ask", "book_inferred_winner",
-    "fee", "get_book", "get_market", "get_tape", "http_get_json",
+    "book_meta", "fee", "get_book", "get_market", "get_tape", "http_get_json",
     "parse_market", "resolved_winner",
     "PolymarketExecutor", "Fill",
     "PmqError", "OrderUncertain", "IntrospectionMismatch",

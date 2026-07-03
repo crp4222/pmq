@@ -152,13 +152,22 @@ def main(run_hours):
                 side_key, price_cap, usd = order          # ('a'|'b', float, float)
                 token = pm["token_a"] if side_key == "a" else pm["token_b"]
                 side_name = pm["outcome_a"] if side_key == "a" else pm["outcome_b"]
+                book = book_a if side_key == "a" else book_b
                 if st["side"] not in (None, side_name):
                     continue                               # one side per market
                 usd = min(usd, remaining / (1 + FEE_RATE * (1 - price_cap)))
-                if usd < 1.0:
+                # reality checks against the live book: an executable ask at
+                # or under the cap, and the per-market exchange minimum size
+                _, _, ask, ask_sz = pmq.best_bid_ask(book)
+                if ask is None or ask > price_cap:
+                    continue
+                min_sh = pmq.book_meta(book)["min_order_size"] or 0.0
+                usd = min(usd, ask * (ask_sz or 0.0))
+                if usd < 1.0 or usd / ask < min_sh:
                     continue
 
-                fill_p, fill_sh, order_id = price_cap, usd / price_cap, ""
+                # paper fills happen at the REAL ask, never at the wished cap
+                fill_p, fill_sh, order_id = ask, usd / ask, ""
                 if ex:
                     try:
                         fill = ex.buy_fak(token, price_cap, usd)
