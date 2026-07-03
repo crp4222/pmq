@@ -1,5 +1,7 @@
 # pmq
 
+<!-- mcp-name: io.github.crp4222/pmq -->
+
 [![PyPI](https://img.shields.io/pypi/v/pmquant)](https://pypi.org/project/pmquant/)
 [![tests](https://github.com/crp4222/pmq/actions/workflows/test.yml/badge.svg)](https://github.com/crp4222/pmq/actions/workflows/test.yml)
 [![canary](https://github.com/crp4222/pmq/actions/workflows/canary.yml/badge.svg)](https://github.com/crp4222/pmq/actions/workflows/canary.yml)

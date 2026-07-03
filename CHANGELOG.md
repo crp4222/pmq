@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.1 (2026-07-03)
+
+* Introspection guard now also verifies `OrderArgsV2` fields (including
+  `builder_code`, which the limit-order path depends on): a client that
+  dropped it is refused at startup instead of failing at call time.
+  pmq-doctor mirrors the same check.
+* Distribution: `server.json` manifest for the MCP registry, and an
+  `mcp-name` ownership token in the README (visible to the registry's PyPI
+  verification, invisible when rendered).
+
 ## 0.4.0 (2026-07-03)
 
 * Typing: the whole public API is annotated and ships a `py.typed` marker;

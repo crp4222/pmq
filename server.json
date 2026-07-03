@@ -1,0 +1,61 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.crp4222/pmq",
+  "title": "pmq (Polymarket CLOB V2)",
+  "description": "Fail-closed Polymarket CLOB V2 data and execution. Read tools (markets, book, fees, account) need no credentials; trading tools are registered only when the operator sets PMQ_MCP_LIVE=1, with a per-order USD cap.",
+  "repository": {
+    "url": "https://github.com/crp4222/pmq",
+    "source": "github"
+  },
+  "version": "0.4.1",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "pmquant",
+      "version": "0.4.1",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "PMQ_MCP_LIVE",
+          "description": "Set to 1 to register the trading tools (fak_buy, fak_sell, cancel_and_reconcile). Unset or any other value keeps the server read-only.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "PMQ_MCP_MAX_USD",
+          "description": "Per-order hard cap in USD enforced before any live buy (default 10). Only relevant when PMQ_MCP_LIVE=1.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "POLY_PRIVATE_KEY",
+          "description": "EOA private key used only to sign orders locally when trading tools are enabled. Never printed or transmitted. Not needed for the read-only tools.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "POLY_FUNDER",
+          "description": "Funder wallet address. Required with signature_type > 0 (deposit wallets). Only used when trading tools are enabled.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "POLY_SIG_TYPE",
+          "description": "Polymarket signature type: 0 EOA, 1 POLY_PROXY, 2 POLY_GNOSIS_SAFE, 3 POLY_1271 (app deposit wallet). Run pmq-doctor if unsure.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "POLY_BUILDER_CODE",
+          "description": "Optional bytes32 builder attribution code. Defaults to the maintainer's public zero-commission code (disclosed in the README); set your own or leave empty to opt out.",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}
