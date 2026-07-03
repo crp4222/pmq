@@ -86,6 +86,39 @@ def write_halt_flag(utc_day, pnl):
         log(f"halt flag write failed ({e}); halt still enforced in-process")
 
 
+def recover_orphans(tracked):
+    """Markets that got a fill but no scoring row (a restart between fill and
+    resolution wipes in-memory state) are rebuilt so the scoring loop settles
+    them. Live scoring re-pulls exchange truth, so numbers cannot drift."""
+    try:
+        scored = set()
+        if os.path.exists(WINDOWS_CSV):
+            for r in csv.DictReader(open(WINDOWS_CSV)):
+                scored.add((r["family"], r["mode"]))
+        if not os.path.exists(FILLS_CSV):
+            return
+        now, orphans = time.time(), {}
+        for r in csv.DictReader(open(FILLS_CSV)):
+            if r["mode"] != MODE or (r["family"], MODE) in scored:
+                continue
+            o = orphans.setdefault(r["family"], {"side": r["side"], "fills": []})
+            o["fills"].append((float(r["price"]), float(r["shares"])))
+        for slug, o in orphans.items():
+            pm = pmq.parse_market(pmq.get_market(slug, log))
+            if not pm:
+                log(f"orphan {slug}: market unresolvable, skipped")
+                continue
+            spent = sum(p * s for p, s in o["fills"])
+            fees = sum(pmq.fee(p, s, FEE_RATE) for p, s in o["fills"])
+            tracked[slug] = {"pm": pm, "first_seen": now - MAX_TRACK_H * 1800,
+                             "fills": o["fills"], "spent": spent, "fees": fees,
+                             "side": o["side"], "winner": None, "src": "",
+                             "resolved": False, "poisoned": False, "sstate": {}}
+            log(f"orphan recovered: {slug} ({len(o['fills'])} fill(s)), will be scored")
+    except Exception as e:
+        log(f"orphan recovery failed (continuing without): {e}")
+
+
 def main(run_hours):
     t_end = time.time() + run_hours * 3600
     ex = None
@@ -109,6 +142,7 @@ def main(run_hours):
         f"daily_halt={DAILY_HALT_USD}$ strategy={strategy.NAME}")
 
     tracked, day_pnl, halted_day = {}, {}, None
+    recover_orphans(tracked)
     last_score_poll = 0.0
 
     while time.time() < t_end:
