@@ -36,10 +36,17 @@ amounts against requested size, cross-checked with `get_trades`.
    unrounded size or price, it diverges from what the exchange signed. Book
    from the response's matched amounts (what pmq's `Fill` does), never from
    your request.
-3. Limit-path fills never exceeded the signed size in these tests. The
-   overfill reports (filled 5.051 on a size-5 order) are consistent with the
-   MARKET-order path instead, where the contract is "spend this amount" and
-   the share count is the division remainder of amount by price.
+3. Limit-path fills never exceeded the signed size in these tests because
+   they matched AT the limit price. The mechanism behind the overfill
+   reports (credit to gmoutsin in
+   [#89](https://github.com/Polymarket/py-clob-client-v2/issues/89)): the
+   signed V2 order is an amounts PAIR (makerAmount USDC, takerAmount
+   tokens), a ratio with a worst-case bound, not a (price, size) tuple.
+   Under price improvement the engine preserves your dollars and returns
+   proportionally MORE tokens (4.95 at a 0.98 ask = 5.051 tokens on a
+   "size 5" order at 0.99). Strictly favorable, but it breaks size-based
+   accounting: book from the matched amounts, and never rely on a
+   marketable limit to cap token count exactly.
 4. The per-market minimum size is enforced server-side with a clean 400, and
    is readable in advance from the book response (`min_order_size`, exposed
    by `pmq.book_meta`).
