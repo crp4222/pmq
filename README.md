@@ -9,6 +9,12 @@ works in production.
 pip install pmq
 ```
 
+As of 2026-07-03 this is, to our knowledge, the **only maintained Python
+layer combining local CLOB V2 signing, an exchange-confirmed fill contract,
+and working deposit-wallet (POLY_1271) auth**. That claim is dated and
+falsifiable: the comparison table below names the alternatives and what each
+does instead; open an issue if it goes stale.
+
 ## Why this exists
 
 Polymarket cut over to CLOB V2 on 2026-04-28. V1-signed orders are rejected in
