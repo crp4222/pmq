@@ -160,3 +160,21 @@ def test_reconcile_cancels_then_reports_truth():
     sh, usd, fees = make(fc).reconcile("0xc")
     assert sh == 2.0 and abs(usd - 1.9) < 1e-9
     assert fc.calls and fc.calls[0][0] == "cancel"
+
+
+def test_fee_rate_authoritative_with_fallback():
+    class WithInfo(FakeClient):
+        def get_clob_market_info(self, condition_id):
+            return {"fd": {"r": 0.03, "e": 1}}
+    assert make(WithInfo()).fee_rate("0xc") == 0.03
+    assert make(FakeClient()).fee_rate("0xc") == 0.07  # fallback: method missing
+
+
+def test_cancel_order_single():
+    class WithCancel(FakeClient):
+        def cancel_orders(self, order_hashes):
+            self.calls.append(("cancel_orders", order_hashes))
+    fc = WithCancel()
+    assert make(fc).cancel_order("0xdead") is True
+    assert ("cancel_orders", ["0xdead"]) in fc.calls
+    assert make(FakeClient()).cancel_order("0xdead") is False

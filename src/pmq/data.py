@@ -191,6 +191,29 @@ def book_inferred_winner(bid_a, bid_b, threshold=0.90):
     return None
 
 
+def event_markets(slug, logger=None):
+    """All binary markets of one event (multi-outcome events like elections
+    or tournaments are one binary market per candidate). Returns a list of
+    :func:`parse_market` dicts; unparseable members are skipped."""
+    ev = http_get_json(f"{GAMMA}/events?slug={slug}", logger=logger)
+    if not ev:
+        return []
+    out = []
+    for m in ev[0].get("markets") or []:
+        pm = parse_market(m)
+        if pm:
+            out.append(pm)
+    return out
+
+
+def positions(user_address, logger=None, limit=200):
+    """Current holdings of a wallet per the data-api (public, ~1 min lag).
+    Answers "what do I hold?" after fills: list of dicts with asset,
+    conditionId, size, avgPrice, currentValue and friends."""
+    return http_get_json(f"{DATA}/positions?user={user_address}&limit={limit}",
+                         logger=logger) or []
+
+
 def get_tape(condition_id, since_ts, max_pages=4, logger=None):
     """Complete trade tape for a closed market (paginated, newest first).
 

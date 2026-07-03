@@ -101,9 +101,16 @@ class PolymarketExecutor:
                  builder_code=_UNSET, host=HOST, chain_id=CHAIN_ID,
                  client=None, derive_creds=True):
         from py_clob_client_v2.clob_types import (
-            AssetType, BalanceAllowanceParams, BuilderConfig,
-            MarketOrderArgsV2, OpenOrderParams, OrderArgsV2,
-            OrderMarketCancelParams, OrderType, TradeParams)
+            AssetType,
+            BalanceAllowanceParams,
+            BuilderConfig,
+            MarketOrderArgsV2,
+            OpenOrderParams,
+            OrderArgsV2,
+            OrderMarketCancelParams,
+            OrderType,
+            TradeParams,
+        )
         from py_clob_client_v2.exceptions import PolyApiException
         self._t = {
             "AssetType": AssetType, "BalanceAllowanceParams": BalanceAllowanceParams,
@@ -271,6 +278,27 @@ class PolymarketExecutor:
         return self._parse_fill(resp, side)
 
     # ---------------- reconciliation ----------------
+    def fee_rate(self, condition_id):
+        """Authoritative taker fee rate for one market, straight from the
+        exchange (``get_clob_market_info`` field ``fd.r``). Falls back to the
+        published crypto rate on failure, so treat the result as an estimate
+        exactly like :data:`~pmq.data.FEE_RATES`."""
+        try:
+            mi = self.client.get_clob_market_info(condition_id)
+            return float(mi["fd"]["r"])
+        except Exception as e:
+            log.warning("fee_rate(%s) fell back to static table: %s", condition_id, e)
+            return FEE_RATES["crypto"]
+
+    def cancel_order(self, order_id):
+        """Cancel one resting order by id. Never raises."""
+        try:
+            self.client.cancel_orders([order_id])
+            return True
+        except Exception as e:
+            log.warning("cancel_order(%s) failed: %s", order_id, e)
+            return False
+
     def cancel_market(self, condition_id):
         """Cancel every resting order of ours on one market. Never raises."""
         try:

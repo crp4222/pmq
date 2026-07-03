@@ -81,6 +81,19 @@ def find_markets(query: str = "", limit: int = 10) -> list:
 
 
 @mcp.tool()
+def event(slug: str) -> list:
+    """All binary markets of one multi-outcome EVENT (an election, a
+    tournament: one market per candidate). Use the event slug from
+    find_markets. Returns per market: slug, outcome names with token ids,
+    close time, settled winner if any."""
+    out = [{"market_slug": pm["slug"],
+            "outcomes": {pm["outcome_a"]: pm["token_a"], pm["outcome_b"]: pm["token_b"]},
+            "end_ts": pm["end_ts"], "settled_winner": data.resolved_winner(pm)}
+           for pm in data.event_markets(slug)]
+    return out or [{"error": f"no event found for slug {slug!r}"}]
+
+
+@mcp.tool()
 def market(slug: str) -> dict:
     """Resolve one Polymarket market by its gamma slug (any category, works
     for expired short-lived markets too). Returns condition_id, the outcome

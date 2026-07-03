@@ -1,5 +1,10 @@
 # pmq
 
+[![PyPI](https://img.shields.io/pypi/v/pmquant)](https://pypi.org/project/pmquant/)
+[![tests](https://github.com/crp4222/pmq/actions/workflows/test.yml/badge.svg)](https://github.com/crp4222/pmq/actions/workflows/test.yml)
+[![canary](https://github.com/crp4222/pmq/actions/workflows/canary.yml/badge.svg)](https://github.com/crp4222/pmq/actions/workflows/canary.yml)
+[![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 Fail-closed execution and market data for **Polymarket CLOB V2**, in Python.
 Local signing (your keys never leave your process), exchange-confirmed fills
 only, fee-correct math, and deposit-wallet (`POLY_1271`) support that actually
@@ -37,6 +42,17 @@ a real error in live trading:
   deposit wallet) are only visible with `signature_type=3`.
 
 The full write-up with reproduction details: [docs/war-story.md](docs/war-story.md).
+
+## Runs in production
+
+The maintainer's own bot trades through this exact executor 24/7 with real
+money. Example receipt (2026-07-03): settlement transaction
+[`0x387f5f09...100d88a8`](https://polygonscan.com/tx/0x387f5f09c031bb36a71c54adc978b1ed4d50c67f6dd3f0c2c8068391100d88a8)
+on the CTF Exchange V2: a FAK market buy built by this library, matched and
+settled, with the builder code visible in the calldata. Additionally, a weekly
+[canary workflow](.github/workflows/canary.yml) exercises the real endpoints
+and the installed client surface, and opens an issue by itself if Polymarket
+drifts.
 
 ## The contract: nothing is booked without exchange confirmation
 

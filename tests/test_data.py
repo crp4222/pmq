@@ -1,7 +1,13 @@
 import json
 
-from pmq import (band_ask_depth_usd, best_bid_ask, book_inferred_winner, fee,
-                 parse_market, resolved_winner)
+from pmq import (
+    band_ask_depth_usd,
+    best_bid_ask,
+    book_inferred_winner,
+    fee,
+    parse_market,
+    resolved_winner,
+)
 
 
 def test_fee_matches_official_formula():
