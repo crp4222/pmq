@@ -19,10 +19,15 @@ Facts this module encodes (verified live, July 2026):
   see :data:`FEE_RATES`. Makers always pay zero. The ``maker/taker_base_fee``
   of 1000 bps seen in API responses is an on-chain CAP, never the charge.
 """
+from __future__ import annotations
+
 import calendar
 import json
 import time
 import urllib.request
+from typing import Any, Callable, TypedDict
+
+Logger = Callable[[str], None]
 
 UA = {"User-Agent": "Mozilla/5.0"}
 GAMMA = "https://gamma-api.polymarket.com"
@@ -31,7 +36,7 @@ DATA = "https://data-api.polymarket.com"
 
 #: Official taker fee rates per market category (docs.polymarket.com/trading/fees,
 #: fetched 2026-07-03). Fee in $ = rate * p * (1 - p) * shares. Makers pay 0.
-FEE_RATES = {
+FEE_RATES: dict[str, float] = {
     "crypto": 0.07,
     "sports": 0.03,
     "finance": 0.04,
@@ -45,7 +50,28 @@ FEE_RATES = {
 }
 
 
-def fee(price, shares, rate=FEE_RATES["crypto"]):
+class ParsedMarket(TypedDict):
+    """Normalized view of a Gamma market object, see :func:`parse_market`."""
+    condition_id: str | None
+    slug: str | None
+    token_a: str
+    token_b: str
+    outcome_a: str
+    outcome_b: str
+    outcome_prices_raw: Any
+    idx_a: int
+    end_ts: int | None
+
+
+class BookMeta(TypedDict):
+    """Exchange metadata riding on a book response, see :func:`book_meta`."""
+    min_order_size: float | None
+    tick_size: float | None
+    neg_risk: bool | None
+    last_trade_price: float | None
+
+
+def fee(price: float, shares: float, rate: float = FEE_RATES["crypto"]) -> float:
     """Taker fee in $ under the current schedule. Makers pay zero.
 
     The fee peaks at price 0.50 and vanishes toward 0 and 1: a taker fill at
@@ -54,7 +80,8 @@ def fee(price, shares, rate=FEE_RATES["crypto"]):
     return rate * price * (1.0 - price) * shares
 
 
-def http_get_json(url, retries=3, timeout=10, logger=None):
+def http_get_json(url: str, retries: int = 3, timeout: float = 10,
+                  logger: Logger | None = None) -> Any:
     """GET a JSON document with linear backoff. Returns None on final failure."""
     for i in range(retries):
         try:
@@ -70,18 +97,20 @@ def http_get_json(url, retries=3, timeout=10, logger=None):
     return None
 
 
-def get_market(slug, logger=None):
+def get_market(slug: str, logger: Logger | None = None) -> dict[str, Any] | None:
     """Gamma market object for a slug, falling back to /events for expired ones."""
     data = http_get_json(f"{GAMMA}/markets?slug={slug}", logger=logger)
     if data:
-        return data[0]
+        first: dict[str, Any] = data[0]
+        return first
     ev = http_get_json(f"{GAMMA}/events?slug={slug}", logger=logger)
     if ev and ev[0].get("markets"):
-        return ev[0]["markets"][0]
+        fallback: dict[str, Any] = ev[0]["markets"][0]
+        return fallback
     return None
 
 
-def _end_ts(m):
+def _end_ts(m: dict[str, Any]) -> int | None:
     """Market close time as unix epoch, or None. Gamma sends UTC ISO 8601."""
     raw = m.get("endDate") or m.get("endDateIso") or ""
     for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%fZ"):
@@ -92,7 +121,8 @@ def _end_ts(m):
     return None
 
 
-def parse_market(m, outcome_a=None, outcome_b=None):
+def parse_market(m: dict[str, Any] | None, outcome_a: str | None = None,
+                 outcome_b: str | None = None) -> ParsedMarket | None:
     """Extract condition id and outcome token ids from a Gamma market object.
 
     Works on ANY binary market: politics, sports, crypto, whatever the
@@ -104,26 +134,26 @@ def parse_market(m, outcome_a=None, outcome_b=None):
     if not m:
         return None
     try:
-        outcomes = json.loads(m["outcomes"]) if isinstance(m.get("outcomes"), str) else m.get("outcomes")
-        token_ids = json.loads(m["clobTokenIds"]) if isinstance(m.get("clobTokenIds"), str) else m.get("clobTokenIds")
+        outcomes: Any = json.loads(m["outcomes"]) if isinstance(m.get("outcomes"), str) else m["outcomes"]
+        token_ids: Any = json.loads(m["clobTokenIds"]) if isinstance(m.get("clobTokenIds"), str) else m["clobTokenIds"]
         a = outcomes.index(outcome_a) if outcome_a else 0
         b = outcomes.index(outcome_b) if outcome_b else (1 if a == 0 else 0)
-        return {
-            "condition_id": m.get("conditionId"),
-            "slug": m.get("slug"),
-            "token_a": token_ids[a],
-            "token_b": token_ids[b],
-            "outcome_a": outcomes[a],
-            "outcome_b": outcomes[b],
-            "outcome_prices_raw": m.get("outcomePrices"),
-            "idx_a": a,
-            "end_ts": _end_ts(m),
-        }
+        return ParsedMarket(
+            condition_id=m.get("conditionId"),
+            slug=m.get("slug"),
+            token_a=token_ids[a],
+            token_b=token_ids[b],
+            outcome_a=outcomes[a],
+            outcome_b=outcomes[b],
+            outcome_prices_raw=m.get("outcomePrices"),
+            idx_a=int(a),
+            end_ts=_end_ts(m),
+        )
     except Exception:
         return None
 
 
-def resolved_winner(pm):
+def resolved_winner(pm: ParsedMarket | None) -> str | None:
     """Winning outcome name from settled Gamma outcomePrices; None if unsettled."""
     if not pm:
         return None
@@ -139,12 +169,14 @@ def resolved_winner(pm):
         return None
 
 
-def get_book(token_id, logger=None):
+def get_book(token_id: str, logger: Logger | None = None) -> dict[str, Any] | None:
     """Real-time CLOB book. THE live data source; never the trade tape."""
-    return http_get_json(f"{CLOB}/book?token_id={token_id}", logger=logger)
+    book: dict[str, Any] | None = http_get_json(f"{CLOB}/book?token_id={token_id}", logger=logger)
+    return book
 
 
-def best_bid_ask(book):
+def best_bid_ask(book: dict[str, Any] | None,
+                 ) -> tuple[float | None, float | None, float | None, float | None]:
     """(best_bid, bid_size, best_ask, ask_size), sizes summed at the level."""
     if not book:
         return None, None, None, None
@@ -157,12 +189,13 @@ def best_bid_ask(book):
     return bb, bb_sz, ba, ba_sz
 
 
-def book_meta(book):
+def book_meta(book: dict[str, Any] | None) -> BookMeta:
     """Exchange metadata riding on the book response: per-market minimum
     order size (shares), tick size, neg_risk flag, last trade price. Read
     these from the live book instead of hardcoding exchange rules."""
     b = book or {}
-    def _f(k):
+
+    def _f(k: str) -> float | None:
         try:
             return float(b[k])
         except (KeyError, TypeError, ValueError):
@@ -171,14 +204,15 @@ def book_meta(book):
             "neg_risk": b.get("neg_risk"), "last_trade_price": _f("last_trade_price")}
 
 
-def band_ask_depth_usd(book, lo, hi):
+def band_ask_depth_usd(book: dict[str, Any] | None, lo: float, hi: float) -> float:
     """Total $ notional of asks resting within [lo, hi]."""
     asks = (book or {}).get("asks") or []
     return round(sum(float(a["price"]) * float(a["size"]) for a in asks
                      if lo <= float(a["price"]) <= hi), 2)
 
 
-def book_inferred_winner(bid_a, bid_b, threshold=0.90):
+def book_inferred_winner(bid_a: float | None, bid_b: float | None,
+                         threshold: float = 0.90) -> str | None:
     """Winner from a last pre-close book snapshot; None if ambiguous.
 
     Use when Gamma settlement lags: a side whose BID is pinned at or above
@@ -191,14 +225,14 @@ def book_inferred_winner(bid_a, bid_b, threshold=0.90):
     return None
 
 
-def event_markets(slug, logger=None):
+def event_markets(slug: str, logger: Logger | None = None) -> list[ParsedMarket]:
     """All binary markets of one event (multi-outcome events like elections
     or tournaments are one binary market per candidate). Returns a list of
     :func:`parse_market` dicts; unparseable members are skipped."""
     ev = http_get_json(f"{GAMMA}/events?slug={slug}", logger=logger)
     if not ev:
         return []
-    out = []
+    out: list[ParsedMarket] = []
     for m in ev[0].get("markets") or []:
         pm = parse_market(m)
         if pm:
@@ -206,7 +240,8 @@ def event_markets(slug, logger=None):
     return out
 
 
-def positions(user_address, logger=None, limit=200):
+def positions(user_address: str, logger: Logger | None = None,
+              limit: int = 200) -> list[dict[str, Any]]:
     """Current holdings of a wallet per the data-api (public, ~1 min lag).
     Answers "what do I hold?" after fills: list of dicts with asset,
     conditionId, size, avgPrice, currentValue and friends."""
@@ -214,13 +249,14 @@ def positions(user_address, logger=None, limit=200):
                          logger=logger) or []
 
 
-def get_tape(condition_id, since_ts, max_pages=4, logger=None):
+def get_tape(condition_id: str, since_ts: float, max_pages: int = 4,
+             logger: Logger | None = None) -> list[dict[str, Any]]:
     """Complete trade tape for a closed market (paginated, newest first).
 
     OFFLINE USE ONLY: the indexer lags matching by 1 to 3 minutes; call at
     least 5 minutes after close or you will score against missing fills.
     """
-    out = []
+    out: list[dict[str, Any]] = []
     for page in range(max_pages):
         batch = http_get_json(
             f"{DATA}/trades?market={condition_id}&limit=500&offset={page*500}",

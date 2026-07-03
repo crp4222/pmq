@@ -128,6 +128,107 @@ def test_builder_code_default_and_optout(monkeypatch):
         PolymarketExecutor(client=FakeClient(), builder_code="0xnotbytes32")
 
 
+def test_builder_code_rides_inside_every_order(monkeypatch):
+    """Attribution is part of the signed order args on BOTH order paths."""
+    monkeypatch.delenv("POLY_BUILDER_CODE", raising=False)
+    ok = {"orderID": "0x1", "makingAmount": "1", "takingAmount": "1"}
+    fc = FakeClient(market_resp=ok)
+    ex = PolymarketExecutor(client=fc)
+    ex.buy_fak("tok", 0.97, 5.0)
+    ex.sell_fak("tok", 0.95, 5.0)
+    ex.limit_gtc("tok", 0.50, 10.0, "BUY")
+    assert [c[1].builder_code for c in fc.calls] == [DEFAULT_BUILDER_CODE] * 3
+
+
+def test_builder_code_env_override_and_optout_reach_the_order(monkeypatch):
+    code = "0x" + "ab" * 32
+    monkeypatch.setenv("POLY_BUILDER_CODE", code)
+    ok = {"orderID": "0x1", "makingAmount": "1", "takingAmount": "1"}
+    fc = FakeClient(market_resp=ok)
+    PolymarketExecutor(client=fc).buy_fak("tok", 0.97, 5.0)
+    assert fc.calls[0][1].builder_code == code
+    fc2 = FakeClient(market_resp=ok)
+    make(fc2).buy_fak("tok", 0.97, 5.0)  # opt-out: client default (zero) stands
+    assert "ab" not in fc2.calls[0][1].builder_code
+
+
+def test_builder_config_reaches_the_real_client(monkeypatch):
+    """The real ClobClient must be constructed with the BuilderConfig too."""
+    import py_clob_client_v2.client as real
+
+    captured = {}
+
+    class SpyClob(FakeClient):
+        def __init__(self, host, chain_id=None, key=None, signature_type=None,
+                     funder=None, builder_config=None, use_server_time=True,
+                     retry_on_error=True):
+            super().__init__()
+            captured["builder_config"] = builder_config
+
+    monkeypatch.setattr(real, "ClobClient", SpyClob)
+    monkeypatch.delenv("POLY_BUILDER_CODE", raising=False)
+    PolymarketExecutor(key="0x" + "1" * 64, derive_creds=False)
+    assert captured["builder_config"].builder_code == DEFAULT_BUILDER_CODE
+
+
+def test_installed_client_injects_builder_config_on_both_paths():
+    """Regression canary for the dependency itself: py-clob-client-v2 must
+    keep injecting the client-level BuilderConfig into limit AND market
+    orders. If this fails after a bump, re-verify attribution end-to-end."""
+    import inspect
+
+    from py_clob_client_v2.client import ClobClient
+    for method in (ClobClient.create_order, ClobClient.create_market_order):
+        assert "builder_config.builder_code" in inspect.getsource(method)
+
+
+# Executable specification of CLAUDE.md invariant 1 (the fail-closed fill
+# contract). One row per possible exchange outcome; weakening any expectation
+# here IS the regression, whatever it fixes elsewhere.
+FAIL_CLOSED_CONTRACT = [
+    # exchange outcome (response or raised exception)         -> expectation
+    ({"orderID": "0x1", "success": True,
+      "makingAmount": "4.98", "takingAmount": "5.1"},            "booked"),
+    ({"orderID": "0x1",
+      "makingAmount": "4.98", "takingAmount": "5.1"},            "booked"),   # success absent
+    ({"orderID": "0x1", "success": True},                        "zero"),     # no amounts
+    ({"orderID": "0x1", "makingAmount": "x", "takingAmount": "y"}, "zero"),   # unparseable
+    ({"orderID": "0x1", "makingAmount": None},                   "zero"),
+    ({"orderID": "0x1", "success": False},                       "rejected"), # flagged failed
+    ({"error": "insufficient balance"},                          "rejected"), # no orderID
+    ({},                                                         "rejected"),
+    ("OK",                                                       "rejected"), # non-dict
+    (None,                                                       "rejected"),
+    (api_error(400, "no orders found to match"),                 "rejected"), # clean 4xx
+    (api_error(404),                                             "rejected"),
+    (api_error(429),                                             "rejected"),
+    (api_error(500),                                             "uncertain"), # 5xx MAY exist
+    (api_error(502),                                             "uncertain"),
+    (api_error(None),                                            "uncertain"), # status unknown
+    (RuntimeError("socket timeout"),                             "uncertain"), # transport
+]
+
+
+@pytest.mark.parametrize("outcome,expected", FAIL_CLOSED_CONTRACT)
+@pytest.mark.parametrize("path", ["market", "limit"])
+def test_fail_closed_fill_contract(outcome, expected, path):
+    kw = {"market_exc": outcome} if isinstance(outcome, Exception) else {"market_resp": outcome}
+    ex = make(FakeClient(**kw))
+    place = (lambda: ex.buy_fak("tok", 0.97, 5.0)) if path == "market" else \
+            (lambda: ex.limit_gtc("tok", 0.97, 5.0, "BUY"))
+    if expected == "uncertain":
+        with pytest.raises(OrderUncertain):
+            place()
+        return
+    f = place()
+    if expected == "booked":
+        assert f and f.matched_shares > 0 and not f.rejected
+    elif expected == "zero":
+        assert not f and not f.rejected and f.order_id  # order exists, books nothing
+    else:
+        assert not f and f.rejected and f.matched_shares == 0
+
+
 def test_trades_totals_filters_and_fees():
     trades = [
         {"side": "BUY", "size": "5", "price": "0.9", "trader_side": "TAKER"},

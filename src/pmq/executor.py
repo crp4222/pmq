@@ -25,13 +25,18 @@ Production notes baked in (all verified live on CLOB V2, July 2026):
   sent. Funds held by a deposit wallet (ERC-1271) are only visible with
   ``signature_type=3`` (POLY_1271).
 * Builder attribution rides INSIDE the signed order (bytes32 code); HTTP
-  headers attribute nothing on V2.
+  headers attribute nothing on V2. pmq sets the code in BOTH places that
+  py-clob-client-v2 honors: per order args and in the client BuilderConfig,
+  so attribution survives whichever path a client version prefers.
 """
+from __future__ import annotations
+
 import inspect
 import logging
 import os
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 from .data import FEE_RATES, fee
 from .exceptions import IntrospectionMismatch, OrderUncertain
@@ -48,7 +53,7 @@ BYTES32_RE = re.compile(r"0x[0-9a-fA-F]{64}")
 # Opt out with PolymarketExecutor(builder_code=None) or use your own code
 # from https://polymarket.com/settings?tab=builder
 DEFAULT_BUILDER_CODE = "0x4b22812cf929165a247b575eb417a3b6c9e3c12e96f0159c4d0ad39f78d17371"
-_UNSET = object()
+_UNSET: Any = object()
 
 
 @dataclass
@@ -60,19 +65,19 @@ class Fill:
     matched_usd: float = 0.0
     rejected: bool = False
     error: str = ""
-    raw: dict = field(default_factory=dict)
+    raw: dict[str, Any] = field(default_factory=dict)
 
     @property
-    def price(self):
+    def price(self) -> float | None:
         return self.matched_usd / self.matched_shares if self.matched_shares else None
 
-    def __bool__(self):
+    def __bool__(self) -> bool:
         return self.matched_shares > 0
 
 
 # (method name, parameters that must exist) verified against py-clob-client-v2
 # 1.0.2 by introspection. If the installed client drifts, we refuse to start.
-_EXPECTED_METHODS = {
+_EXPECTED_METHODS: dict[str, tuple[str, ...]] = {
     "create_and_post_market_order": ("order_args", "order_type"),
     "create_and_post_order": ("order_args", "order_type"),
     "cancel_market_orders": ("payload",),
@@ -80,7 +85,8 @@ _EXPECTED_METHODS = {
     "get_trades": ("params",),
     "get_balance_allowance": ("params",),
 }
-_EXPECTED_MARKET_ARGS = ("token_id", "amount", "side", "price", "builder_code")
+_EXPECTED_MARKET_ARGS: tuple[str, ...] = (
+    "token_id", "amount", "side", "price", "builder_code")
 
 
 class PolymarketExecutor:
@@ -97,9 +103,11 @@ class PolymarketExecutor:
     server derive the wallet that actually holds the pUSD.
     """
 
-    def __init__(self, key=None, funder=None, signature_type=None,
-                 builder_code=_UNSET, host=HOST, chain_id=CHAIN_ID,
-                 client=None, derive_creds=True):
+    def __init__(self, key: str | None = None, funder: str | None = None,
+                 signature_type: int | None = None,
+                 builder_code: str | None = _UNSET,
+                 host: str = HOST, chain_id: int = CHAIN_ID,
+                 client: Any = None, derive_creds: bool = True) -> None:
         from py_clob_client_v2.clob_types import (
             AssetType,
             BalanceAllowanceParams,
@@ -112,19 +120,19 @@ class PolymarketExecutor:
             TradeParams,
         )
         from py_clob_client_v2.exceptions import PolyApiException
-        self._t = {
+        self._t: dict[str, Any] = {
             "AssetType": AssetType, "BalanceAllowanceParams": BalanceAllowanceParams,
             "MarketOrderArgs": MarketOrderArgsV2, "OpenOrderParams": OpenOrderParams,
             "OrderArgs": OrderArgsV2, "OrderMarketCancelParams": OrderMarketCancelParams,
             "OrderType": OrderType, "TradeParams": TradeParams,
         }
-        self.PolyApiException = PolyApiException
+        self.PolyApiException: type[Exception] = PolyApiException
 
         if builder_code is _UNSET:
             builder_code = os.environ.get("POLY_BUILDER_CODE", DEFAULT_BUILDER_CODE)
         if builder_code and not BYTES32_RE.fullmatch(builder_code):
             raise ValueError("builder_code must be bytes32 hex (0x + 64 hex chars) or None")
-        self.builder_code = builder_code
+        self.builder_code: str | None = builder_code
 
         if client is not None:
             self.client = client
@@ -149,8 +157,8 @@ class PolymarketExecutor:
         log.info("executor ready (builder=%s)", "on" if builder_code else "off")
 
     # ---------------- introspection guard ----------------
-    def _verify_client_surface(self):
-        drifts = []
+    def _verify_client_surface(self) -> None:
+        drifts: list[str] = []
         for name, params in _EXPECTED_METHODS.items():
             fn = getattr(self.client, name, None)
             if fn is None:
@@ -177,7 +185,7 @@ class PolymarketExecutor:
                 "was tested with or upgrade pmq.")
 
     # ---------------- balance ----------------
-    def collateral(self):
+    def collateral(self) -> float:
         """Available pUSD collateral as seen by the CLOB for this EOA and
         signature_type. Raw 6-decimal units converted to $. Any parse failure
         returns 0.0 (fail closed)."""
@@ -189,7 +197,7 @@ class PolymarketExecutor:
             log.warning("collateral check failed: %s", e)
             return 0.0
 
-    def require_collateral(self, min_usd):
+    def require_collateral(self, min_usd: float) -> float:
         """Raise if the CLOB-visible collateral is below ``min_usd``."""
         usdc = self.collateral()
         if usdc < min_usd:
@@ -200,7 +208,12 @@ class PolymarketExecutor:
         return usdc
 
     # ---------------- orders ----------------
-    def _parse_fill(self, resp, side):
+    def _builder_kwargs(self) -> dict[str, str]:
+        # Per-order attribution: explicit beats relying on the client-level
+        # BuilderConfig injection, and works with injected test clients too.
+        return {"builder_code": self.builder_code} if self.builder_code else {}
+
+    def _parse_fill(self, resp: Any, side: str) -> Fill:
         if not (isinstance(resp, dict) and resp.get("orderID")
                 and resp.get("success") is not False):
             return Fill(rejected=True, error=repr(resp)[:300],
@@ -216,12 +229,14 @@ class PolymarketExecutor:
         return Fill(order_id=str(resp["orderID"]), matched_shares=shares,
                     matched_usd=usd, raw=resp)
 
-    def _market_order(self, token_id, amount, side, price):
+    def _market_order(self, token_id: str, amount: float, side: str,
+                      price: float) -> Fill:
         t = self._t
         try:
             resp = self.client.create_and_post_market_order(
                 t["MarketOrderArgs"](token_id=token_id, amount=amount,
-                                     side=side, price=price),
+                                     side=side, price=price,
+                                     **self._builder_kwargs()),
                 order_type=t["OrderType"].FAK)
         except self.PolyApiException as e:
             status = getattr(e, "status_code", None)
@@ -235,7 +250,7 @@ class PolymarketExecutor:
             raise OrderUncertain(repr(e)[:300])
         return self._parse_fill(resp, side)
 
-    def buy_fak(self, token_id, price_cap, usd):
+    def buy_fak(self, token_id: str, price_cap: float, usd: float) -> Fill:
         """Fill-and-kill market BUY: spend up to ``usd`` (rounded DOWN to the
         cent, the exchange accuracy for market-buy maker amounts) at prices no
         worse than ``price_cap``. Whatever does not match immediately is
@@ -247,7 +262,7 @@ class PolymarketExecutor:
             return Fill(rejected=True, error="usd amount rounds to zero")
         return self._market_order(token_id, usd, "BUY", price_cap)
 
-    def sell_fak(self, token_id, price_floor, shares):
+    def sell_fak(self, token_id: str, price_floor: float, shares: float) -> Fill:
         """Fill-and-kill market SELL of ``shares`` at prices no worse than
         ``price_floor``. Same confirmation contract as :meth:`buy_fak`.
         The buy path has carried live volume; the sell path follows the same
@@ -257,7 +272,8 @@ class PolymarketExecutor:
             return Fill(rejected=True, error="share amount rounds to zero")
         return self._market_order(token_id, shares, "SELL", price_floor)
 
-    def limit_gtc(self, token_id, price, size, side, post_only=False):
+    def limit_gtc(self, token_id: str, price: float, size: float, side: str,
+                  post_only: bool = False) -> Fill:
         """Resting GTC limit order. Returns a :class:`Fill` whose matched
         amounts reflect only what crossed IMMEDIATELY; the rest is resting
         (track it via :meth:`open_orders`, settle via :meth:`trades_totals`).
@@ -265,7 +281,8 @@ class PolymarketExecutor:
         t = self._t
         try:
             resp = self.client.create_and_post_order(
-                t["OrderArgs"](token_id=token_id, price=price, size=size, side=side),
+                t["OrderArgs"](token_id=token_id, price=price, size=size,
+                               side=side, **self._builder_kwargs()),
                 order_type=t["OrderType"].GTC, post_only=post_only)
         except self.PolyApiException as e:
             status = getattr(e, "status_code", None)
@@ -278,7 +295,7 @@ class PolymarketExecutor:
         return self._parse_fill(resp, side)
 
     # ---------------- reconciliation ----------------
-    def fee_rate(self, condition_id):
+    def fee_rate(self, condition_id: str) -> float:
         """Authoritative taker fee rate for one market, straight from the
         exchange (``get_clob_market_info`` field ``fd.r``). Falls back to the
         published crypto rate on failure, so treat the result as an estimate
@@ -290,7 +307,7 @@ class PolymarketExecutor:
             log.warning("fee_rate(%s) fell back to static table: %s", condition_id, e)
             return FEE_RATES["crypto"]
 
-    def cancel_order(self, order_id):
+    def cancel_order(self, order_id: str) -> bool:
         """Cancel one resting order by id. Never raises."""
         try:
             self.client.cancel_orders([order_id])
@@ -299,7 +316,7 @@ class PolymarketExecutor:
             log.warning("cancel_order(%s) failed: %s", order_id, e)
             return False
 
-    def cancel_market(self, condition_id):
+    def cancel_market(self, condition_id: str) -> bool:
         """Cancel every resting order of ours on one market. Never raises."""
         try:
             self.client.cancel_market_orders(
@@ -309,7 +326,7 @@ class PolymarketExecutor:
             log.warning("cancel_market(%s) failed: %s", condition_id, e)
             return False
 
-    def open_orders(self, condition_id=None):
+    def open_orders(self, condition_id: str | None = None) -> list[dict[str, Any]] | None:
         try:
             return self.client.get_open_orders(
                 self._t["OpenOrderParams"](market=condition_id)) or []
@@ -317,8 +334,9 @@ class PolymarketExecutor:
             log.warning("get_open_orders failed: %s", e)
             return None
 
-    def trades_totals(self, condition_id, token_id=None, side="BUY",
-                      fee_rate=FEE_RATES["crypto"]):
+    def trades_totals(self, condition_id: str, token_id: str | None = None,
+                      side: str = "BUY", fee_rate: float = FEE_RATES["crypto"],
+                      ) -> tuple[float, float, float] | None:
         """Exchange truth for one market: (shares, usd, fee_estimate) actually
         traded on our account, or None if the API is unreachable. FAILED
         trades are excluded; maker fills carry zero fee."""
@@ -344,7 +362,8 @@ class PolymarketExecutor:
                 fees += fee(p, s, fee_rate)
         return sh, usd, fees
 
-    def reconcile(self, condition_id, token_id=None):
+    def reconcile(self, condition_id: str, token_id: str | None = None,
+                  ) -> tuple[float, float, float] | None:
         """After :class:`OrderUncertain`: cancel anything possibly resting,
         verify nothing stayed open, then return exchange-truth totals. Call
         this BEFORE placing any new order on that market."""

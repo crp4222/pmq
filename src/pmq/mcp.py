@@ -11,11 +11,17 @@ Run with ``pmq-mcp`` (stdio transport). Design rules:
   and reports exchange truth instead of guessing.
 * POLY_PRIVATE_KEY is read by the executor, used to sign, never returned.
 """
+from __future__ import annotations
+
 import os
 import urllib.parse
+from typing import TYPE_CHECKING, Any
 
 from . import data
 from .exceptions import OrderUncertain
+
+if TYPE_CHECKING:
+    from .executor import Fill, PolymarketExecutor
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -36,10 +42,10 @@ mcp = FastMCP(
            "this server is read-only.")),
 )
 
-_executor = None
+_executor: PolymarketExecutor | None = None
 
 
-def _ex():
+def _ex() -> PolymarketExecutor:
     global _executor
     if _executor is None:
         from .executor import PolymarketExecutor
@@ -47,7 +53,7 @@ def _ex():
     return _executor
 
 
-def _fill_dict(fill):
+def _fill_dict(fill: Fill) -> dict[str, Any]:
     return {"order_id": fill.order_id, "matched_shares": fill.matched_shares,
             "matched_usd": fill.matched_usd, "price": fill.price,
             "rejected": fill.rejected, "error": fill.error,
@@ -55,7 +61,7 @@ def _fill_dict(fill):
 
 
 @mcp.tool()
-def find_markets(query: str = "", limit: int = 10) -> list:
+def find_markets(query: str = "", limit: int = 10) -> list[dict[str, Any]]:
     """Discover tradeable Polymarket markets of ANY kind (politics, sports,
     crypto, culture). With a query, full-text search; without, the most
     active events by 24h volume. Returns event title plus, per market, the
@@ -81,7 +87,7 @@ def find_markets(query: str = "", limit: int = 10) -> list:
 
 
 @mcp.tool()
-def event(slug: str) -> list:
+def event(slug: str) -> list[dict[str, Any]]:
     """All binary markets of one multi-outcome EVENT (an election, a
     tournament: one market per candidate). Use the event slug from
     find_markets. Returns per market: slug, outcome names with token ids,
@@ -94,7 +100,7 @@ def event(slug: str) -> list:
 
 
 @mcp.tool()
-def market(slug: str) -> dict:
+def market(slug: str) -> dict[str, Any]:
     """Resolve one Polymarket market by its gamma slug (any category, works
     for expired short-lived markets too). Returns condition_id, the outcome
     names mapped to their token ids (use those token ids with `book` and the
@@ -110,7 +116,7 @@ def market(slug: str) -> dict:
 
 
 @mcp.tool()
-def book(token_id: str, depth_lo: float = 0.0, depth_hi: float = 1.0) -> dict:
+def book(token_id: str, depth_lo: float = 0.0, depth_hi: float = 1.0) -> dict[str, Any]:
     """REAL-TIME order book summary for one outcome token: best bid/ask with
     sizes, plus the $ notional of asks resting inside [depth_lo, depth_hi].
     This endpoint is served by the matching engine; trust it over the trade
@@ -125,7 +131,7 @@ def book(token_id: str, depth_lo: float = 0.0, depth_hi: float = 1.0) -> dict:
 
 
 @mcp.tool()
-def taker_fee(price: float, shares: float, category: str = "crypto") -> dict:
+def taker_fee(price: float, shares: float, category: str = "crypto") -> dict[str, Any]:
     """Official Polymarket taker fee in $ (fee = rate * p * (1-p) * shares).
     Categories and rates: crypto 0.07, sports 0.03, finance/politics/mentions/
     tech 0.04, economics/culture/weather 0.05, geopolitics 0. Makers pay 0."""
@@ -137,7 +143,7 @@ def taker_fee(price: float, shares: float, category: str = "crypto") -> dict:
 
 
 @mcp.tool()
-def account_collateral() -> dict:
+def account_collateral() -> dict[str, Any]:
     """Collateral (pUSD, $) the CLOB sees for the configured account. If this
     is 0 while funds are on-chain, the operator's POLY_SIG_TYPE is wrong
     (the Polymarket app's deposit wallet needs 3)."""
@@ -145,7 +151,7 @@ def account_collateral() -> dict:
 
 
 @mcp.tool()
-def account_trades(condition_id: str, token_id: str = "") -> dict:
+def account_trades(condition_id: str, token_id: str = "") -> dict[str, Any]:
     """Exchange-truth totals of OUR account's BUY trades on one market:
     (shares, usd, fee estimate). This is the reconciliation source, use it
     after any uncertainty instead of trusting local bookkeeping."""
@@ -158,7 +164,7 @@ def account_trades(condition_id: str, token_id: str = "") -> dict:
 
 if LIVE_ENABLED:
     @mcp.tool()
-    def fak_buy(token_id: str, price_cap: float, usd: float) -> dict:
+    def fak_buy(token_id: str, price_cap: float, usd: float) -> dict[str, Any]:
         """Place a fill-and-kill market BUY: spend up to `usd` at prices no
         worse than `price_cap`. Nothing rests on the book. Book ONLY what
         `matched_shares`/`matched_usd` report; `booked: false` means nothing
@@ -172,7 +178,7 @@ if LIVE_ENABLED:
                              "on this market before any new order"}
 
     @mcp.tool()
-    def fak_sell(token_id: str, price_floor: float, shares: float) -> dict:
+    def fak_sell(token_id: str, price_floor: float, shares: float) -> dict[str, Any]:
         """Fill-and-kill market SELL of `shares` at prices no worse than
         `price_floor`. Same confirmation contract as fak_buy."""
         try:
@@ -182,7 +188,7 @@ if LIVE_ENABLED:
                              "call account_trades before any new order"}
 
     @mcp.tool()
-    def cancel_and_reconcile(condition_id: str, token_id: str = "") -> dict:
+    def cancel_and_reconcile(condition_id: str, token_id: str = "") -> dict[str, Any]:
         """Cancel every resting order of ours on one market, verify none
         stayed open, and return exchange-truth totals. Call this after any
         'outcome unknown' before placing new orders on that market."""
@@ -193,7 +199,7 @@ if LIVE_ENABLED:
         return {"cancelled": True, "shares": sh, "usd": usd, "fee_estimate": fees}
 
 
-def main():
+def main() -> None:
     mcp.run()
 
 

@@ -36,7 +36,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name):
+def __getattr__(name: str) -> object:
     # Lazy import: the data layer must stay usable without py-clob-client-v2.
     if name in ("PolymarketExecutor", "Fill", "DEFAULT_BUILDER_CODE"):
         from . import executor

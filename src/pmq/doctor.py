@@ -6,11 +6,14 @@ while funds sit on-chain, drifted client surface, per-market minimums.
 Read-only: derives addresses, calls public RPC and CLOB endpoints. Never
 prints or transmits the private key. Exit code 0 when everything is green.
 """
+from __future__ import annotations
+
 import inspect
 import json
 import os
 import sys
 import urllib.request
+from typing import Any
 
 from .data import best_bid_ask, book_meta, fee, get_book, get_market, parse_market
 
@@ -20,10 +23,10 @@ RPCS = ["https://polygon-rpc.com", "https://polygon-bor-rpc.publicnode.com",
 GREEN, RED, WARN = "[ok]", "[!!]", "[??]"
 
 
-def _rpc(method, params):
+def _rpc(method: str, params: list[Any]) -> Any:
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method,
                        "params": params}).encode()
-    last = None
+    last: Exception = RuntimeError("no RPC endpoint reachable")
     for rpc in RPCS:
         try:
             req = urllib.request.Request(rpc, data=body, headers={
@@ -38,13 +41,14 @@ def _rpc(method, params):
     raise last
 
 
-def looks_like_minimal_proxy(bytecode):
+def looks_like_minimal_proxy(bytecode: str | None) -> bool:
     """ERC-1167 minimal proxies (Polymarket deposit wallets included) are a
     tiny stub; a bare EOA has no code at all."""
-    return bytecode not in (None, "", "0x") and len(bytecode) < 400
+    return bytecode not in (None, "", "0x") and len(bytecode or "") < 400
 
 
-def advise_sig_type(funder_is_contract, owner_is_eoa, funder_equals_eoa):
+def advise_sig_type(funder_is_contract: bool, owner_is_eoa: bool,
+                    funder_equals_eoa: bool) -> tuple[int | None, str]:
     """One sentence of advice from the on-chain facts."""
     if funder_equals_eoa:
         return 0, "funder IS the EOA: signature_type=0"
@@ -57,12 +61,12 @@ def advise_sig_type(funder_is_contract, owner_is_eoa, funder_equals_eoa):
     return None, "funder has no code on-chain: not a deployed wallet"
 
 
-def check(ok, label, detail=""):
+def check(ok: object, label: str, detail: str = "") -> bool:
     print(f"{GREEN if ok else RED} {label}" + (f": {detail}" if detail else ""))
     return bool(ok)
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     market_arg = None
     if "--market" in argv:
@@ -109,9 +113,15 @@ def main(argv=None):
     eoa = Account.from_key(key).address
     print(f"     derived EOA: {eoa}")
     print(f"     POLY_FUNDER: {funder or '(unset)'}   POLY_SIG_TYPE: {sig}")
+    try:
+        sig_val = int(sig)
+    except ValueError:
+        all_ok &= check(False, "POLY_SIG_TYPE is a number",
+                        f"{sig!r} is not; use 0 (EOA) or 3 (deposit wallet)")
+        sig_val = -1
 
     # 3. on-chain truth about the funder
-    expected_sig = 0
+    expected_sig: int | None = 0
     if funder and funder.lower() != eoa.lower():
         try:
             code = _rpc("eth_getCode", [funder, "latest"])
@@ -123,20 +133,21 @@ def main(argv=None):
                     owner = "0x" + res[-40:]
             except Exception:
                 pass
-            owner_is_eoa = bool(owner) and owner.lower() == eoa.lower()
+            owner_is_eoa = owner is not None and owner.lower() == eoa.lower()
             expected_sig, advice = advise_sig_type(is_contract, owner_is_eoa, False)
             all_ok &= check(expected_sig is not None, "funder wallet on-chain", advice)
             bal = int(_rpc("eth_call", [{"to": PUSD, "data":
                       "0x70a08231" + funder.lower()[2:].rjust(64, "0")}, "latest"]), 16) / 1e6
             print(f"     on-chain pUSD at funder: {bal:.2f}")
         except Exception as e:
-            check(False, "on-chain funder checks (RPC)", str(e)[:120])
+            all_ok &= check(False, "on-chain funder checks (RPC)", str(e)[:120])
+            expected_sig = None
     else:
         expected_sig, advice = advise_sig_type(False, False, True)
         check(True, "funder", advice)
 
     if expected_sig is not None:
-        good = int(sig) == expected_sig
+        good = sig_val == expected_sig
         all_ok &= check(good, f"POLY_SIG_TYPE={sig} matches the wallet type",
                         "" if good else f"set POLY_SIG_TYPE={expected_sig}")
 
@@ -149,7 +160,7 @@ def main(argv=None):
         all_ok &= seen
         if not seen:
             for st in (0, 1, 2, 3):
-                if st == int(sig):
+                if st == sig_val:
                     continue
                 try:
                     alt = PolymarketExecutor(signature_type=st).collateral()

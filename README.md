@@ -3,6 +3,8 @@
 [![PyPI](https://img.shields.io/pypi/v/pmquant)](https://pypi.org/project/pmquant/)
 [![tests](https://github.com/crp4222/pmq/actions/workflows/test.yml/badge.svg)](https://github.com/crp4222/pmq/actions/workflows/test.yml)
 [![canary](https://github.com/crp4222/pmq/actions/workflows/canary.yml/badge.svg)](https://github.com/crp4222/pmq/actions/workflows/canary.yml)
+[![coverage gate](https://img.shields.io/badge/coverage-%E2%89%A585%25%20enforced%20in%20CI-blue)](.github/workflows/test.yml)
+[![typed](https://img.shields.io/badge/types-mypy%20strict-blue)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 Fail-closed execution and market data for **Polymarket CLOB V2**, in Python.

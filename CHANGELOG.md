@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+* Typing: the whole public API is annotated and ships a `py.typed` marker;
+  `mypy --strict` runs in CI. New exported types `ParsedMarket` and
+  `BookMeta` (TypedDicts) describe what `parse_market` and `book_meta`
+  return.
+* Builder attribution: the code now rides explicitly inside EVERY order's
+  args (market and limit paths) in addition to the client-level
+  BuilderConfig, and tests pin all three layers: executor args, real client
+  construction, and the dependency's own config injection. Disclosure and
+  one-line opt-out unchanged.
+* Tests: 97 (from 39). Executable table of the fail-closed fill contract
+  (one row per possible exchange outcome, both order paths), deep pmq-doctor
+  scenarios with mocked RPC and CLOB (sig_type advice, alternative sig_type
+  probing, market section), MCP tool coverage including the gated live
+  tools. Coverage gate at 85% in CI.
+* pmq-doctor fixes: an RPC failure now fails the run (it used to leave the
+  verdict green), and a non-numeric POLY_SIG_TYPE is diagnosed instead of
+  crashing.
+* CI: test matrix extended to Python 3.10 through 3.14, classifiers updated
+  accordingly.
+
 ## 0.3.0 (2026-07-03)
 
 * New: `pmq-doctor`, a read-only diagnosis command for Polymarket V2 setups.

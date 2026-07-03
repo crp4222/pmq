@@ -86,6 +86,88 @@ def test_book_inferred_winner():
     assert book_inferred_winner(None, None) is None
 
 
+def test_http_get_json_success_and_permanent_failure(monkeypatch):
+    import io
+    import urllib.request
+
+    from pmq import data as d
+
+    class FakeResp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda req, timeout=10: FakeResp(b'{"a": 1}'))
+    assert d.http_get_json("http://x") == {"a": 1}
+
+    def boom(req, timeout=10):
+        raise OSError("down")
+    logged = []
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    monkeypatch.setattr(d.time, "sleep", lambda s: None)
+    assert d.http_get_json("http://x", logger=logged.append) is None
+    assert logged and "permanently" in logged[0]
+
+
+def test_get_market_falls_back_to_events(monkeypatch):
+    from pmq import data as d
+    calls = []
+
+    def fake_get(url, logger=None):
+        calls.append(url)
+        if "/markets" in url:
+            return []
+        return [{"markets": [{"conditionId": "0xevt"}]}]
+    monkeypatch.setattr(d, "http_get_json", fake_get)
+    assert d.get_market("expired-slug")["conditionId"] == "0xevt"
+    assert len(calls) == 2
+
+    monkeypatch.setattr(d, "http_get_json", lambda url, logger=None: None)
+    assert d.get_market("nope") is None
+
+
+def test_event_markets_skips_unparseable_members(monkeypatch):
+    from pmq import data as d
+    ev = [{"markets": [_gamma_market(), {"outcomes": "not json"}]}]
+    monkeypatch.setattr(d, "http_get_json", lambda url, logger=None: ev)
+    out = d.event_markets("some-event")
+    assert len(out) == 1 and out[0]["condition_id"] == "0xc0nd"
+    monkeypatch.setattr(d, "http_get_json", lambda url, logger=None: None)
+    assert d.event_markets("nope") == []
+
+
+def test_positions_empty_on_unreachable_api(monkeypatch):
+    from pmq import data as d
+    monkeypatch.setattr(d, "http_get_json", lambda url, logger=None: None)
+    assert d.positions("0x" + "a" * 40) == []
+
+
+def test_get_tape_paginates_until_since_ts(monkeypatch):
+    from pmq import data as d
+    pages = [[{"timestamp": 200}, {"timestamp": 150}],
+             [{"timestamp": 90}],
+             [{"timestamp": 10}]]
+
+    def fake_get(url, logger=None):
+        return pages.pop(0) if pages else []
+    monkeypatch.setattr(d, "http_get_json", fake_get)
+    tape = d.get_tape("0xc", since_ts=100)
+    # stops after the page whose oldest trade predates since_ts
+    assert [t["timestamp"] for t in tape] == [200, 150, 90]
+
+
+def test_package_lazy_exports():
+    import pmq
+    assert pmq.Fill is not None  # lazy, pulls the executor module
+    assert pmq.DEFAULT_BUILDER_CODE.startswith("0x")
+    import pytest as _pytest
+    with _pytest.raises(AttributeError):
+        pmq.does_not_exist
+
+
 def test_doctor_pure_logic():
     from pmq.doctor import advise_sig_type, looks_like_minimal_proxy
     assert looks_like_minimal_proxy("0x363d3d373d3d363d6020366004")
