@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-07-03)
 
 * Typing: the whole public API is annotated and ships a `py.typed` marker;
   `mypy --strict` runs in CI. New exported types `ParsedMarket` and
@@ -21,6 +21,8 @@
   crashing.
 * CI: test matrix extended to Python 3.10 through 3.14, classifiers updated
   accordingly.
+* Template: the dash brands itself pmq-bot-dash, matching the shipped
+  pmq-bot.service unit name.
 
 ## 0.3.0 (2026-07-03)
 

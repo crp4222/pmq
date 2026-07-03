@@ -87,16 +87,16 @@ def test_main_market_flag_without_value_exits_2(capsys):
 
 
 def test_deposit_wallet_all_green(setup, capsys):
-    setup(sig="3", funder=FUNDER, balances={3: 39.42})
+    setup(sig="3", funder=FUNDER, balances={3: 87.65})
     assert doctor.main([]) == 0
     out = capsys.readouterr().out
     assert "signature_type=3" in out
-    assert "39.42 USDC" in out
+    assert "87.65 USDC" in out
     assert "everything green" in out
 
 
 def test_wrong_sig_type_for_deposit_wallet(setup, capsys):
-    setup(sig="0", funder=FUNDER, balances={0: 0.0, 3: 39.42})
+    setup(sig="0", funder=FUNDER, balances={0: 0.0, 3: 87.65})
     assert doctor.main([]) == 1
     assert "set POLY_SIG_TYPE=3" in capsys.readouterr().out
 

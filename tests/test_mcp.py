@@ -87,7 +87,7 @@ class FakeExecutor:
         self.fill, self.uncertain, self.trades = fill, uncertain, trades
 
     def collateral(self):
-        return 39.42
+        return 87.65
 
     def buy_fak(self, token_id, price_cap, usd):
         from pmq.exceptions import OrderUncertain
@@ -107,7 +107,7 @@ class FakeExecutor:
 def test_account_tools_report_executor_truth(monkeypatch):
     m = load_mcp(monkeypatch)
     m._executor = FakeExecutor()
-    assert m.account_collateral() == {"collateral_usd": 39.42}
+    assert m.account_collateral() == {"collateral_usd": 87.65}
     out = m.account_trades(condition_id="0xc")
     assert (out["shares"], out["usd"]) == (2.0, 1.9)
     m._executor = FakeExecutor(trades=None)

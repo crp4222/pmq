@@ -3,7 +3,7 @@
 
 Design constraints:
   - stdlib only (http.server), one process, a few MB of RSS: safe on the Pi
-  - READ ONLY: parses bot_runs CSVs, systemctl show and the favbot journal;
+  - READ ONLY: parses bot_runs CSVs, systemctl show and the bot's journal;
     never reads live.env, never talks to any exchange API, no secrets
   - the phone does the rendering; this process only ships small JSON + one
     static HTML file (cached in memory, CSVs re-parsed only on mtime change)
@@ -67,7 +67,7 @@ def _run(cmd):
 
 
 def service_state():
-    """favbot systemd state + last collateral line from its journal."""
+    """bot systemd state + last collateral line from its journal."""
     with _lock:
         cached = _cache.get("svc")
         if cached and time.time() - cached[0] < SVC_CACHE_S:
@@ -141,7 +141,7 @@ def api_payload():
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "favbot-dash"
+    server_version = "pmq-bot-dash"
 
     def _send(self, code, ctype, body):
         self.send_response(code)
@@ -172,5 +172,5 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
-    print(f"favbot-dash listening on :{PORT}", flush=True)
+    print(f"pmq-bot-dash listening on :{PORT}", flush=True)
     srv.serve_forever()
