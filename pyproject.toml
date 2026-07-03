@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pmq"
+version = "0.1.0"
+description = "Fail-closed execution and market-data layer for Polymarket CLOB V2: local signing, confirmed fills only, fee-correct math, working deposit-wallet (POLY_1271) support."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "crp4222" }]
+requires-python = ">=3.10"
+dependencies = ["py-clob-client-v2>=1.0.2,<2"]
+keywords = [
+    "polymarket", "clob", "clob-v2", "prediction-markets", "trading",
+    "execution", "market-order", "fak", "builder-code", "deposit-wallet",
+    "poly-1271", "orderbook", "quant",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+
+[project.urls]
+Homepage = "https://github.com/crp4222/pmq"
+Issues = "https://github.com/crp4222/pmq/issues"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pmq"]

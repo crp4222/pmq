@@ -1,0 +1,329 @@
+"""Fail-closed execution layer for Polymarket CLOB V2.
+
+Design contract, in one paragraph: nothing is ever booked unless the exchange
+confirmed it. A fill exists only if the order response is a dict bearing an
+orderID and not flagged failed, and only for the matched size the response
+reports. A 4xx is a clean rejection (the order does not exist). A timeout or
+5xx raises :class:`~pmq.exceptions.OrderUncertain` and the caller must
+reconcile via :meth:`PolymarketExecutor.reconcile` before trading that market
+again. Unparseable responses count as zero fill. This is the difference
+between a bot that survives a flaky network and one that buys its stake again
+on every poll.
+
+Production notes baked in (all verified live on CLOB V2, July 2026):
+
+* FAK/FOK BUY orders are treated by the CLOB as MARKET orders: the maker
+  amount is USDC with at most 2 decimals. Posting them as plain limit orders
+  fails with ``invalid amounts, the market buy orders maker amount supports a
+  max accuracy of 2 decimals``. pmq routes them through the market-order
+  builder, which applies the correct rounding.
+* A 400 ``no orders found to match with FAK order`` WITH an orderID in the
+  body is a clean no-fill (the ask vanished between your poll and your send),
+  not an error state.
+* The balance endpoint derives the funding wallet server-side from the
+  authenticated EOA and ``signature_type``; the ``funder`` parameter is never
+  sent. Funds held by a deposit wallet (ERC-1271) are only visible with
+  ``signature_type=3`` (POLY_1271).
+* Builder attribution rides INSIDE the signed order (bytes32 code); HTTP
+  headers attribute nothing on V2.
+"""
+import inspect
+import logging
+import os
+import re
+from dataclasses import dataclass, field
+
+from .data import FEE_RATES, fee
+from .exceptions import IntrospectionMismatch, OrderUncertain
+
+log = logging.getLogger("pmq")
+
+HOST = "https://clob.polymarket.com"
+CHAIN_ID = 137
+BYTES32_RE = re.compile(r"0x[0-9a-fA-F]{64}")
+
+# Builder attribution default. DISCLOSURE: this is the pmq maintainer's public
+# builder code (commission 0/0: it never adds fees to your orders). It funds
+# the project through Polymarket's builder program at zero cost to you.
+# Opt out with PolymarketExecutor(builder_code=None) or use your own code
+# from https://polymarket.com/settings?tab=builder
+DEFAULT_BUILDER_CODE = "0x4b22812cf929165a247b575eb417a3b6c9e3c12e96f0159c4d0ad39f78d17371"
+_UNSET = object()
+
+
+@dataclass
+class Fill:
+    """Exchange-confirmed execution result. ``matched_shares == 0`` means no
+    fill happened and NOTHING must be booked, whatever the caller hoped."""
+    order_id: str = ""
+    matched_shares: float = 0.0
+    matched_usd: float = 0.0
+    rejected: bool = False
+    error: str = ""
+    raw: dict = field(default_factory=dict)
+
+    @property
+    def price(self):
+        return self.matched_usd / self.matched_shares if self.matched_shares else None
+
+    def __bool__(self):
+        return self.matched_shares > 0
+
+
+# (method name, parameters that must exist) verified against py-clob-client-v2
+# 1.0.2 by introspection. If the installed client drifts, we refuse to start.
+_EXPECTED_METHODS = {
+    "create_and_post_market_order": ("order_args", "order_type"),
+    "create_and_post_order": ("order_args", "order_type"),
+    "cancel_market_orders": ("payload",),
+    "get_open_orders": ("params",),
+    "get_trades": ("params",),
+    "get_balance_allowance": ("params",),
+}
+_EXPECTED_MARKET_ARGS = ("token_id", "amount", "side", "price", "builder_code")
+
+
+class PolymarketExecutor:
+    """Thin, fail-closed wrapper around the official py-clob-client-v2.
+
+    Reads POLY_PRIVATE_KEY, POLY_FUNDER, POLY_SIG_TYPE and POLY_BUILDER_CODE
+    from the environment unless passed explicitly. The private key is used to
+    instantiate the signer and is never logged.
+
+    ``signature_type``: 0 EOA, 1 POLY_PROXY (email/Magic), 2 POLY_GNOSIS_SAFE,
+    3 POLY_1271 (deposit wallet, the default wallet of the Polymarket app).
+    If the CLOB shows a 0 balance while the funds sit on your funder address
+    on-chain, your signature_type is wrong: only the matching type makes the
+    server derive the wallet that actually holds the pUSD.
+    """
+
+    def __init__(self, key=None, funder=None, signature_type=None,
+                 builder_code=_UNSET, host=HOST, chain_id=CHAIN_ID,
+                 client=None, derive_creds=True):
+        from py_clob_client_v2.clob_types import (
+            AssetType, BalanceAllowanceParams, BuilderConfig,
+            MarketOrderArgsV2, OpenOrderParams, OrderArgsV2,
+            OrderMarketCancelParams, OrderType, TradeParams)
+        from py_clob_client_v2.exceptions import PolyApiException
+        self._t = {
+            "AssetType": AssetType, "BalanceAllowanceParams": BalanceAllowanceParams,
+            "MarketOrderArgs": MarketOrderArgsV2, "OpenOrderParams": OpenOrderParams,
+            "OrderArgs": OrderArgsV2, "OrderMarketCancelParams": OrderMarketCancelParams,
+            "OrderType": OrderType, "TradeParams": TradeParams,
+        }
+        self.PolyApiException = PolyApiException
+
+        if builder_code is _UNSET:
+            builder_code = os.environ.get("POLY_BUILDER_CODE", DEFAULT_BUILDER_CODE)
+        if builder_code and not BYTES32_RE.fullmatch(builder_code):
+            raise ValueError("builder_code must be bytes32 hex (0x + 64 hex chars) or None")
+        self.builder_code = builder_code
+
+        if client is not None:
+            self.client = client
+        else:
+            from py_clob_client_v2.client import ClobClient
+            key = key or os.environ.get("POLY_PRIVATE_KEY")
+            if not key:
+                raise ValueError("POLY_PRIVATE_KEY missing (env or key= argument)")
+            funder = funder or os.environ.get("POLY_FUNDER")
+            if signature_type is None:
+                signature_type = int(os.environ.get("POLY_SIG_TYPE", "0"))
+            if signature_type > 0 and not funder:
+                raise ValueError("signature_type > 0 requires the funder wallet address")
+            builder_config = BuilderConfig(builder_code=builder_code) if builder_code else None
+            self.client = ClobClient(host, chain_id=chain_id, key=key,
+                                     signature_type=signature_type, funder=funder,
+                                     builder_config=builder_config,
+                                     use_server_time=True, retry_on_error=True)
+            if derive_creds:
+                self.client.set_api_creds(self.client.create_or_derive_api_key())
+        self._verify_client_surface()
+        log.info("executor ready (builder=%s)", "on" if builder_code else "off")
+
+    # ---------------- introspection guard ----------------
+    def _verify_client_surface(self):
+        drifts = []
+        for name, params in _EXPECTED_METHODS.items():
+            fn = getattr(self.client, name, None)
+            if fn is None:
+                drifts.append(f"method {name} missing")
+                continue
+            try:
+                have = set(inspect.signature(fn).parameters)
+            except (TypeError, ValueError):
+                continue
+            for p in params:
+                if p not in have:
+                    drifts.append(f"{name}() lost parameter {p}")
+        margs = self._t["MarketOrderArgs"]
+        have = set(inspect.signature(margs).parameters)
+        for p in _EXPECTED_MARKET_ARGS:
+            if p not in have:
+                drifts.append(f"MarketOrderArgsV2 lost field {p}")
+        if not hasattr(self._t["OrderType"], "FAK"):
+            drifts.append("OrderType.FAK missing")
+        if drifts:
+            raise IntrospectionMismatch(
+                "installed py-clob-client-v2 drifted from the verified surface: "
+                + "; ".join(drifts) + ". Refusing to trade; pin the version pmq "
+                "was tested with or upgrade pmq.")
+
+    # ---------------- balance ----------------
+    def collateral(self):
+        """Available pUSD collateral as seen by the CLOB for this EOA and
+        signature_type. Raw 6-decimal units converted to $. Any parse failure
+        returns 0.0 (fail closed)."""
+        try:
+            bal = self.client.get_balance_allowance(self._t["BalanceAllowanceParams"](
+                asset_type=self._t["AssetType"].COLLATERAL))
+            return float(bal.get("balance", 0)) / 1e6 if isinstance(bal, dict) else 0.0
+        except Exception as e:
+            log.warning("collateral check failed: %s", e)
+            return 0.0
+
+    def require_collateral(self, min_usd):
+        """Raise if the CLOB-visible collateral is below ``min_usd``."""
+        usdc = self.collateral()
+        if usdc < min_usd:
+            raise RuntimeError(
+                f"collateral {usdc:.2f} USDC below required {min_usd:.2f}. If the "
+                f"funds ARE on your funder address on-chain, your signature_type "
+                f"is wrong (deposit wallets need 3).")
+        return usdc
+
+    # ---------------- orders ----------------
+    def _parse_fill(self, resp, side):
+        if not (isinstance(resp, dict) and resp.get("orderID")
+                and resp.get("success") is not False):
+            return Fill(rejected=True, error=repr(resp)[:300],
+                        raw=resp if isinstance(resp, dict) else {})
+        # For a BUY the maker amount is USDC given and the taker amount shares
+        # received; a SELL mirrors it. Unparseable counts as zero (fail closed).
+        try:
+            making = float(resp.get("makingAmount") or 0.0)
+            taking = float(resp.get("takingAmount") or 0.0)
+        except (TypeError, ValueError):
+            making = taking = 0.0
+        usd, shares = (making, taking) if side == "BUY" else (taking, making)
+        return Fill(order_id=str(resp["orderID"]), matched_shares=shares,
+                    matched_usd=usd, raw=resp)
+
+    def _market_order(self, token_id, amount, side, price):
+        t = self._t
+        try:
+            resp = self.client.create_and_post_market_order(
+                t["MarketOrderArgs"](token_id=token_id, amount=amount,
+                                     side=side, price=price),
+                order_type=t["OrderType"].FAK)
+        except self.PolyApiException as e:
+            status = getattr(e, "status_code", None)
+            msg = str(getattr(e, "error_msg", e))[:300]
+            if status is not None and 400 <= status < 500:
+                # clean rejection, the order does not exist server-side;
+                # "no orders found to match" lands here and is a no-fill
+                return Fill(rejected=True, error=f"{status}: {msg}")
+            raise OrderUncertain(f"status={status} {msg}")
+        except Exception as e:
+            raise OrderUncertain(repr(e)[:300])
+        return self._parse_fill(resp, side)
+
+    def buy_fak(self, token_id, price_cap, usd):
+        """Fill-and-kill market BUY: spend up to ``usd`` (rounded DOWN to the
+        cent, the exchange accuracy for market-buy maker amounts) at prices no
+        worse than ``price_cap``. Whatever does not match immediately is
+        killed by the exchange; nothing ever rests. Returns a :class:`Fill`;
+        book ONLY ``fill.matched_shares`` and ``fill.matched_usd``.
+        Raises :class:`OrderUncertain` when the outcome is unknown."""
+        usd = int(usd * 100) / 100.0
+        if usd <= 0:
+            return Fill(rejected=True, error="usd amount rounds to zero")
+        return self._market_order(token_id, usd, "BUY", price_cap)
+
+    def sell_fak(self, token_id, price_floor, shares):
+        """Fill-and-kill market SELL of ``shares`` at prices no worse than
+        ``price_floor``. Same confirmation contract as :meth:`buy_fak`.
+        The buy path has carried live volume; the sell path follows the same
+        documented semantics but flag it as less battle-tested."""
+        shares = int(shares * 100) / 100.0
+        if shares <= 0:
+            return Fill(rejected=True, error="share amount rounds to zero")
+        return self._market_order(token_id, shares, "SELL", price_floor)
+
+    def limit_gtc(self, token_id, price, size, side, post_only=False):
+        """Resting GTC limit order. Returns a :class:`Fill` whose matched
+        amounts reflect only what crossed IMMEDIATELY; the rest is resting
+        (track it via :meth:`open_orders`, settle via :meth:`trades_totals`).
+        Maker fills cost zero fee."""
+        t = self._t
+        try:
+            resp = self.client.create_and_post_order(
+                t["OrderArgs"](token_id=token_id, price=price, size=size, side=side),
+                order_type=t["OrderType"].GTC, post_only=post_only)
+        except self.PolyApiException as e:
+            status = getattr(e, "status_code", None)
+            msg = str(getattr(e, "error_msg", e))[:300]
+            if status is not None and 400 <= status < 500:
+                return Fill(rejected=True, error=f"{status}: {msg}")
+            raise OrderUncertain(f"status={status} {msg}")
+        except Exception as e:
+            raise OrderUncertain(repr(e)[:300])
+        return self._parse_fill(resp, side)
+
+    # ---------------- reconciliation ----------------
+    def cancel_market(self, condition_id):
+        """Cancel every resting order of ours on one market. Never raises."""
+        try:
+            self.client.cancel_market_orders(
+                self._t["OrderMarketCancelParams"](market=condition_id))
+            return True
+        except Exception as e:
+            log.warning("cancel_market(%s) failed: %s", condition_id, e)
+            return False
+
+    def open_orders(self, condition_id=None):
+        try:
+            return self.client.get_open_orders(
+                self._t["OpenOrderParams"](market=condition_id)) or []
+        except Exception as e:
+            log.warning("get_open_orders failed: %s", e)
+            return None
+
+    def trades_totals(self, condition_id, token_id=None, side="BUY",
+                      fee_rate=FEE_RATES["crypto"]):
+        """Exchange truth for one market: (shares, usd, fee_estimate) actually
+        traded on our account, or None if the API is unreachable. FAILED
+        trades are excluded; maker fills carry zero fee."""
+        try:
+            trades = self.client.get_trades(
+                self._t["TradeParams"](market=condition_id, asset_id=token_id))
+        except Exception as e:
+            log.warning("get_trades(%s) failed: %s", condition_id, e)
+            return None
+        sh = usd = fees = 0.0
+        for t in trades or []:
+            if not isinstance(t, dict) or t.get("side") != side:
+                continue
+            if t.get("status") == "FAILED":
+                continue
+            try:
+                s, p = float(t.get("size") or 0), float(t.get("price") or 0)
+            except (TypeError, ValueError):
+                continue
+            sh += s
+            usd += p * s
+            if t.get("trader_side") != "MAKER":
+                fees += fee(p, s, fee_rate)
+        return sh, usd, fees
+
+    def reconcile(self, condition_id, token_id=None):
+        """After :class:`OrderUncertain`: cancel anything possibly resting,
+        verify nothing stayed open, then return exchange-truth totals. Call
+        this BEFORE placing any new order on that market."""
+        self.cancel_market(condition_id)
+        still = self.open_orders(condition_id)
+        if still:
+            log.warning("reconcile(%s): %d orders still open after cancel, retrying",
+                        condition_id, len(still))
+            self.cancel_market(condition_id)
+        return self.trades_totals(condition_id, token_id)
