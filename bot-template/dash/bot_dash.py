@@ -94,7 +94,8 @@ def service_state():
                  "-n", "1500", "--no-pager", "-q"])
     lines = jout.splitlines()
     for line in reversed(lines):
-        if "live executor ready" in line and "collateral" in line:
+        # matches both the startup line and the per-scoring republication
+        if "collateral" in line:
             try:
                 collateral = float(line.split("collateral", 1)[1].split()[0])
                 collateral_ts = float(line.split(" ", 1)[0])

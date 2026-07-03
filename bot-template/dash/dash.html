@@ -97,7 +97,7 @@ footer .stale{color:var(--warn);font-weight:600}
   </div>
 
   <div class="tiles">
-    <div class="tile"><div class="lbl">Balance estimée</div><div class="val" id="tBal">…</div><div class="hint" id="tBalH"></div></div>
+    <div class="tile"><div class="lbl">Balance</div><div class="val" id="tBal">…</div><div class="hint" id="tBalH"></div></div>
     <div class="tile"><div class="lbl">Win rate</div><div class="val" id="tWr">…</div><div class="hint" id="tWrH"></div></div>
     <div class="tile"><div class="lbl">PnL période</div><div class="val" id="tPnl">…</div><div class="hint" id="tPnlH"></div></div>
     <div class="tile"><div class="lbl">Frais payés</div><div class="val" id="tFee">…</div><div class="hint" id="tFeeH"></div></div>
@@ -186,7 +186,9 @@ function renderTiles(){
     const extra = d.windows.filter(w => w.mode === "live" && (w.scored_ts||0) > (s.collateral_ts||0))
                            .reduce((a,w) => a + (w.net_pnl||0), 0);
     $("tBal").textContent = "~" + (s.collateral + extra).toFixed(2) + "$";
-    $("tBalH").textContent = "collatéral vu au démarrage " + (extra ? "+ scoré depuis" : "");
+    $("tBalH").textContent = "vue exchange, maj il y a "
+      + (s.collateral_ts ? ago(d.now - s.collateral_ts) : "?")
+      + (extra ? " + scoré depuis" : "");
   } else { $("tBal").textContent = "?"; $("tBalH").textContent = "visible en mode live"; }
   $("tWr").textContent = rows.length ? Math.round(100*wins/rows.length) + "%" : "…";
   $("tWrH").textContent = rows.length ? wins + "W/" + (rows.length-wins) + "L · " + state.mode + " " + per : "aucune fenêtre";

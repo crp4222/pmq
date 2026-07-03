@@ -251,6 +251,12 @@ def main(run_hours):
                     log(f"{slug}: SCORED {st['side']} net={net:+.2f}$ "
                         f"winner={winner} day={day_pnl[d]:+.2f}$")
                     st["resolved"] = True
+                    if ex:
+                        # republish the CLOB-visible balance so the dashboard
+                        # tracks exchange truth without ever holding keys
+                        c = ex.collateral()
+                        if c > 0:
+                            log(f"collateral {c:.2f} USDC")
 
         except SystemExit:
             raise
