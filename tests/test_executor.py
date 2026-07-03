@@ -114,6 +114,23 @@ def test_buy_amount_rounds_down_to_cent():
     assert fc.calls[0][1].amount == 4.99
 
 
+def test_cent_rounding_has_no_binary_drift():
+    from pmq.executor import _floor_cents
+    # int(x*100)/100 would return one cent low here; _floor_cents must not.
+    assert _floor_cents(16.90) == 16.90
+    assert _floor_cents(33.30) == 33.30
+    assert _floor_cents(66.60) == 66.60
+    # genuine sub-cent values still floor
+    assert _floor_cents(5.007) == 5.00
+    assert _floor_cents(4.999) == 4.99
+
+
+def test_buy_fak_sends_intended_cents_not_drifted():
+    fc = FakeClient(market_resp={"orderID": "0x1", "makingAmount": "0", "takingAmount": "0"})
+    make(fc).buy_fak("tok", 0.97, 16.90)
+    assert fc.calls[0][1].amount == 16.90  # not 16.89
+
+
 def test_zero_amount_never_reaches_the_wire():
     fc = FakeClient()
     f = make(fc).buy_fak("tok", 0.97, 0.004)

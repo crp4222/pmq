@@ -36,6 +36,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
+from decimal import ROUND_DOWN, Decimal
 from typing import Any
 
 from .data import FEE_RATES, fee
@@ -54,6 +55,17 @@ BYTES32_RE = re.compile(r"0x[0-9a-fA-F]{64}")
 # from https://polymarket.com/settings?tab=builder
 DEFAULT_BUILDER_CODE = "0x4b22812cf929165a247b575eb417a3b6c9e3c12e96f0159c4d0ad39f78d17371"
 _UNSET: Any = object()
+
+_CENT = Decimal("0.01")
+
+
+def _floor_cents(x: float) -> float:
+    """Round DOWN to the cent without the binary-float drift that makes
+    ``int(16.90 * 100) / 100`` return ``16.89``. ``str(x)`` yields the shortest
+    decimal repr, so ``16.90`` stays ``16.90`` while a genuine ``16.907`` still
+    floors to ``16.90``. Rounding down preserves the never-exceed-budget
+    contract for buys and the never-oversell contract for sells."""
+    return float(Decimal(str(x)).quantize(_CENT, rounding=ROUND_DOWN))
 
 
 @dataclass
@@ -264,7 +276,7 @@ class PolymarketExecutor:
         killed by the exchange; nothing ever rests. Returns a :class:`Fill`;
         book ONLY ``fill.matched_shares`` and ``fill.matched_usd``.
         Raises :class:`OrderUncertain` when the outcome is unknown."""
-        usd = int(usd * 100) / 100.0
+        usd = _floor_cents(usd)
         if usd <= 0:
             return Fill(rejected=True, error="usd amount rounds to zero")
         return self._market_order(token_id, usd, "BUY", price_cap)
@@ -274,7 +286,7 @@ class PolymarketExecutor:
         ``price_floor``. Same confirmation contract as :meth:`buy_fak`.
         The buy path has carried live volume; the sell path follows the same
         documented semantics but flag it as less battle-tested."""
-        shares = int(shares * 100) / 100.0
+        shares = _floor_cents(shares)
         if shares <= 0:
             return Fill(rejected=True, error="share amount rounds to zero")
         return self._market_order(token_id, shares, "SELL", price_floor)

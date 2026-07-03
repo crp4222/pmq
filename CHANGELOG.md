@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.2 (2026-07-03)
+
+* Fix: `buy_fak`/`sell_fak` cent-rounding used `int(x * 100) / 100`, which
+  floors a binary-drifted float (`16.90` stored as `16.8999…` became
+  `16.89`), silently shaving a cent off intended-clean amounts. Replaced with
+  a `Decimal`-based `_floor_cents` that rounds down without the drift, keeping
+  the never-exceed-budget contract. Matches the behavior documented in
+  docs/rounding-study.md.
+
 ## 0.4.1 (2026-07-03)
 
 * Introspection guard now also verifies `OrderArgsV2` fields (including
