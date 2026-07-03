@@ -64,7 +64,13 @@ def check(ok, label, detail=""):
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
-    market_arg = argv[argv.index("--market") + 1] if "--market" in argv else None
+    market_arg = None
+    if "--market" in argv:
+        i = argv.index("--market")
+        if i + 1 >= len(argv):
+            print("usage: pmq-doctor [--market <gamma-slug>]")
+            return 2
+        market_arg = argv[i + 1]
     all_ok = True
     print("pmq-doctor: Polymarket V2 setup diagnosis (read-only, no key ever printed)\n")
 
@@ -109,11 +115,12 @@ def main(argv=None):
     if funder and funder.lower() != eoa.lower():
         try:
             code = _rpc("eth_getCode", [funder, "latest"])
-            is_contract = looks_like_minimal_proxy(code) or len(code or "0x") > 2
+            is_contract = code not in (None, "", "0x")
             owner = None
             try:
                 res = _rpc("eth_call", [{"to": funder, "data": "0x8da5cb5b"}, "latest"])
-                owner = "0x" + res[-40:]
+                if isinstance(res, str) and len(res) >= 42:
+                    owner = "0x" + res[-40:]
             except Exception:
                 pass
             owner_is_eoa = bool(owner) and owner.lower() == eoa.lower()
@@ -164,8 +171,12 @@ def main(argv=None):
             bid, _, ask, _ = best_bid_ask(b)
             print(f"{GREEN} market {market_arg}: bid={bid} ask={ask} "
                   f"min_order_size={meta['min_order_size']} tick={meta['tick_size']}")
-            print(f"     taker fee at ask: {fee(ask or 0.5, 1.0):.4f}$/share (crypto table; "
-                  f"authoritative per-market rate via executor.fee_rate)")
+            if ask is not None:
+                print(f"     taker fee at ask: {fee(ask, 1.0):.4f}$/share (crypto table; "
+                      f"authoritative per-market rate via executor.fee_rate)")
+            if meta["min_order_size"] and ask:
+                print(f"     smallest possible order here: about "
+                      f"{meta['min_order_size'] * ask:.2f}$")
         else:
             all_ok &= check(False, f"market {market_arg} resolvable",
                             "expired or wrong slug; recurring families need the window "

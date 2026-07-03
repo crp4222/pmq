@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.0 (2026-07-03)
+
+* New: `pmq-doctor`, a read-only diagnosis command for Polymarket V2 setups.
+  Checks the installed py-clob-client-v2 against the verified surface,
+  derives the EOA from `POLY_PRIVATE_KEY` (never printed), reads the funder
+  on-chain (contract vs EOA, `owner()`), advises the right `POLY_SIG_TYPE`,
+  verifies the CLOB sees collateral with the configured identity (and probes
+  the other signature types when it does not), and optionally checks one
+  market (`--market <slug>`: book, min_order_size, tick, taker fee).
+* Docs: docs/recipes.md cookbook (trade a market, paper-test a strategy,
+  read positions, verify builder attribution on-chain), demo card in the
+  README.
+* CI: the publish workflow refuses to upload when the release tag does not
+  match the version in pyproject.toml (the failure mode that blocked the
+  first 0.3.0 release).
+
 ## 0.2.0 (2026-07-03)
 
 * New: `positions(user)` and `event_markets(slug)` in the data layer; `event`
