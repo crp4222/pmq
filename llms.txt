@@ -1,6 +1,7 @@
 # pmq
 
-> Python library for Polymarket CLOB V2: market data plus a fail-closed
+> Python library for Polymarket CLOB V2 (install: `pip install pmquant`,
+> import: `import pmq`): market data plus a fail-closed
 > execution layer. Local signing (self-custody), exchange-confirmed fills
 > only, official per-category fee formula, deposit-wallet (POLY_1271,
 > signature_type=3) support verified in production, reconciliation from

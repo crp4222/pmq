@@ -6,8 +6,11 @@ only, fee-correct math, and deposit-wallet (`POLY_1271`) support that actually
 works in production.
 
 ```bash
-pip install pmq
+pip install pmquant        # distribution name pmquant, import name pmq
 ```
+
+(PyPI's similarity check reserves the bare name; the module you import is
+`pmq`, same pattern as beautifulsoup4/bs4.)
 
 As of 2026-07-03 this is, to our knowledge, the **only maintained Python
 layer combining local CLOB V2 signing, an exchange-confirmed fill contract,
@@ -137,7 +140,7 @@ JKorf/Polymarket.Net; the official client defaults to zero attribution.)
 
 ## MCP server (agents)
 
-`pip install "pmq[mcp]"` then run `pmq-mcp` (stdio). Read tools (market,
+`pip install "pmquant[mcp]"` then run `pmq-mcp` (stdio). Read tools (market,
 book, taker_fee, account_collateral, account_trades) always exist. Trading
 tools (`fak_buy`, `fak_sell`, `cancel_and_reconcile`) are **only registered
 when the operator sets `PMQ_MCP_LIVE=1`** in the server environment: an

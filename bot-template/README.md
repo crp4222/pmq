@@ -17,7 +17,7 @@ part that is not.
 ## Quickstart (paper, safe anywhere)
 
 ```bash
-pip install pmq
+pip install pmquant
 BOT_SLUGS="<any-gamma-market-slug>" python bot.py 24
 ```
 
