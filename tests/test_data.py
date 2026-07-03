@@ -44,6 +44,15 @@ def test_parse_market_updown_and_yesno():
     assert pm2["token_a"] == "222" and pm2["token_b"] == "111"
 
 
+def test_parse_market_generic_outcomes_and_end_ts():
+    m = _gamma_market(outcomes=("G2 Esports", "Top Esports"))
+    m["endDate"] = "2026-07-04T12:00:00Z"
+    pm = parse_market(m)
+    assert pm["outcome_a"] == "G2 Esports" and pm["outcome_b"] == "Top Esports"
+    assert pm["end_ts"] == 1783166400
+    assert resolved_winner(pm) == "G2 Esports"
+
+
 def test_parse_market_fails_closed():
     assert parse_market(None) is None
     assert parse_market({"outcomes": "not json"}) is None

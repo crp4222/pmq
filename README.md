@@ -129,6 +129,38 @@ PolymarketExecutor(builder_code="0xYOURS...")    # your own code
 or set the `POLY_BUILDER_CODE` environment variable. (Same model as
 JKorf/Polymarket.Net; the official client defaults to zero attribution.)
 
+## MCP server (agents)
+
+`pip install "pmq[mcp]"` then run `pmq-mcp` (stdio). Read tools (market,
+book, taker_fee, account_collateral, account_trades) always exist. Trading
+tools (`fak_buy`, `fak_sell`, `cancel_and_reconcile`) are **only registered
+when the operator sets `PMQ_MCP_LIVE=1`** in the server environment: an
+agent cannot talk its way past a tool that was never created. Every order is
+capped per call by `PMQ_MCP_MAX_USD` (default 10).
+
+```json
+{
+  "mcpServers": {
+    "pmq": {
+      "command": "pmq-mcp",
+      "env": { "POLY_PRIVATE_KEY": "...", "POLY_FUNDER": "0x...", "POLY_SIG_TYPE": "3" }
+    }
+  }
+}
+```
+
+Leave the `POLY_*` variables out entirely for a read-only market-data server.
+
+## Bot template
+
+[bot-template/](bot-template/) is a complete bot minus the strategy, for ANY
+market (politics, sports, crypto, culture): paper mode against real books
+with real fees, per-market budgets with fee headroom, poisoned-market
+reconciliation, consecutive-failure halt, disk-persisted daily loss halt, a
+systemd unit with `RestartPreventExitStatus=42` so halts stay halted, and a
+lightweight phone dashboard. You implement `watchlist()` and `decide()`; the
+shipped demo strategy is an API illustration meant to be replaced.
+
 ## Security posture
 
 * Keys are read from the environment, used to instantiate the signer, and

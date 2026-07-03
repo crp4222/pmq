@@ -19,6 +19,7 @@ Facts this module encodes (verified live, July 2026):
   see :data:`FEE_RATES`. Makers always pay zero. The ``maker/taker_base_fee``
   of 1000 bps seen in API responses is an on-chain CAP, never the charge.
 """
+import calendar
 import json
 import time
 import urllib.request
@@ -80,25 +81,43 @@ def get_market(slug, logger=None):
     return None
 
 
-def parse_market(m, outcome_a="Up", outcome_b="Down"):
+def _end_ts(m):
+    """Market close time as unix epoch, or None. Gamma sends UTC ISO 8601."""
+    raw = m.get("endDate") or m.get("endDateIso") or ""
+    for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%fZ"):
+        try:
+            return calendar.timegm(time.strptime(raw, fmt))
+        except (ValueError, OverflowError):
+            continue
+    return None
+
+
+def parse_market(m, outcome_a=None, outcome_b=None):
     """Extract condition id and outcome token ids from a Gamma market object.
 
-    Defaults target the up/down families; pass ``outcome_a``/``outcome_b`` for
-    Yes/No markets. Returns None on any shape surprise (fail closed).
+    Works on ANY binary market: politics, sports, crypto, whatever the
+    outcome names are (Yes/No, Up/Down, team names). By default the two
+    outcomes are taken in the order the market declares them; pass
+    ``outcome_a``/``outcome_b`` to pin a specific one to the ``a`` slot.
+    Returns None on any shape surprise (fail closed).
     """
     if not m:
         return None
     try:
         outcomes = json.loads(m["outcomes"]) if isinstance(m.get("outcomes"), str) else m.get("outcomes")
         token_ids = json.loads(m["clobTokenIds"]) if isinstance(m.get("clobTokenIds"), str) else m.get("clobTokenIds")
+        a = outcomes.index(outcome_a) if outcome_a else 0
+        b = outcomes.index(outcome_b) if outcome_b else (1 if a == 0 else 0)
         return {
             "condition_id": m.get("conditionId"),
-            "token_a": token_ids[outcomes.index(outcome_a)],
-            "token_b": token_ids[outcomes.index(outcome_b)],
-            "outcome_a": outcome_a,
-            "outcome_b": outcome_b,
+            "slug": m.get("slug"),
+            "token_a": token_ids[a],
+            "token_b": token_ids[b],
+            "outcome_a": outcomes[a],
+            "outcome_b": outcomes[b],
             "outcome_prices_raw": m.get("outcomePrices"),
-            "idx_a": outcomes.index(outcome_a),
+            "idx_a": a,
+            "end_ts": _end_ts(m),
         }
     except Exception:
         return None

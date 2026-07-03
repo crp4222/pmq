@@ -1,0 +1,26 @@
+[Unit]
+Description=pmq bot (paper mode by default)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bot
+WorkingDirectory=/home/bot/pmq-bot
+Environment=BOT_MODE=paper
+Environment=BOT_STAKE=5
+ExecStart=/home/bot/pmq-bot/venv/bin/python3 /home/bot/pmq-bot/bot.py 87600
+Restart=always
+RestartSec=10
+# Voluntary fail-closed halts exit 42 and must STAY stopped; every other
+# exit keeps auto-restarting. This single line is the difference between a
+# risk halt and a crash loop.
+RestartPreventExitStatus=42
+
+# Secrets pattern: keep POLY_* in a root-owned env file loaded via a drop-in,
+# never in this unit. Example drop-in /etc/systemd/system/pmq-bot.service.d/10-secrets.conf:
+#   [Service]
+#   EnvironmentFile=/etc/pmq-bot/live.env
+
+[Install]
+WantedBy=multi-user.target

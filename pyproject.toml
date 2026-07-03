@@ -30,7 +30,11 @@ Homepage = "https://github.com/crp4222/pmq"
 Issues = "https://github.com/crp4222/pmq/issues"
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+mcp = ["mcp>=1.2"]
+dev = ["pytest>=8", "mcp>=1.2"]
+
+[project.scripts]
+pmq-mcp = "pmq.mcp:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pmq"]

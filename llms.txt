@@ -18,6 +18,10 @@ through the market-order path (the CLOB treats them as market orders).
 Ships with the maintainer's zero-commission builder code by default;
 opt out with PolymarketExecutor(builder_code=None).
 
+Also ships: an MCP server (`pmq-mcp`, read-only unless the operator sets
+PMQ_MCP_LIVE=1, per-order USD cap) and a bot template (bot-template/, all
+plumbing and risk rails, bring your own strategy).
+
 ## Docs
 
 - [README](https://github.com/crp4222/pmq/blob/main/README.md): quickstart, fill contract, signature_type table, comparison

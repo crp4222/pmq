@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="pmq bot">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f9f9f7">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0d0d0d">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎯</text></svg>">
+<title>pmq bot</title>
+<style>
+/* Palette: reference instance of the dataviz skill (pre-validated, light+dark). */
+:root{
+  --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e;
+  --muted:#898781; --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,.10);
+  --s1:#2a78d6; --neg:#e34948; --good:#006300; --bad:#d03b3b;
+  --dot-good:#0ca30c; --warn:#fab219;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --page:#0d0d0d; --surface:#1a1a19; --ink:#ffffff; --ink2:#c3c2b7;
+    --muted:#898781; --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10);
+    --s1:#3987e5; --neg:#e66767; --good:#0ca30c; --bad:#d03b3b;
+  }
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{
+  font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;
+  background:var(--page); color:var(--ink); overflow-x:hidden;
+  padding:calc(env(safe-area-inset-top) + 10px) calc(env(safe-area-inset-right) + 12px)
+          calc(env(safe-area-inset-bottom) + 24px) calc(env(safe-area-inset-left) + 12px);
+}
+.wrap{max-width:520px;margin:0 auto;display:flex;flex-direction:column;gap:10px}
+header{display:flex;align-items:center;justify-content:space-between;padding:2px 4px}
+h1{font-size:20px;font-weight:650;letter-spacing:.2px}
+.pill{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--ink2);
+  background:var(--surface);border:1px solid var(--border);border-radius:99px;padding:6px 12px}
+.pill .dot{width:9px;height:9px;border-radius:50%}
+.pill small{font-weight:400;color:var(--muted)}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px}
+.card h2{font-size:12px;font-weight:600;color:var(--ink2);margin-bottom:8px;letter-spacing:.2px}
+.card h2 span{color:var(--muted);font-weight:400}
+/* hero */
+.hero .big{font-size:44px;font-weight:650;line-height:1.1;letter-spacing:-.5px}
+.hero .sub{color:var(--muted);font-size:13px;margin-top:4px}
+.pos{color:var(--good)} .negv{color:var(--bad)} .neu{color:var(--ink)}
+/* tiles */
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.tile{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:12px 14px}
+.tile .lbl{font-size:12px;color:var(--ink2)}
+.tile .val{font-size:22px;font-weight:650;margin-top:2px}
+.tile .hint{font-size:11px;color:var(--muted);margin-top:1px}
+/* filter row */
+.filters{display:flex;gap:8px}
+.seg{display:flex;flex:1;background:var(--surface);border:1px solid var(--border);
+  border-radius:11px;padding:3px;gap:3px}
+.seg button{flex:1;border:0;background:transparent;color:var(--ink2);font:600 13px system-ui;
+  padding:9px 0;border-radius:8px;min-height:38px}
+.seg button.on{background:var(--page);color:var(--ink);box-shadow:0 0 0 1px var(--border)}
+/* charts */
+.chart{position:relative}
+svg{display:block;width:100%;touch-action:pan-y}
+svg text{font:11px system-ui;fill:var(--muted);font-variant-numeric:tabular-nums;pointer-events:none}
+.tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--border);
+  border-radius:9px;padding:7px 10px;font-size:12px;color:var(--ink2);box-shadow:0 3px 12px rgba(0,0,0,.18);
+  white-space:nowrap;display:none;z-index:2}
+.tip b{color:var(--ink);font-variant-numeric:tabular-nums}
+/* table */
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{font-size:11px;font-weight:600;color:var(--muted);text-align:left;padding:2px 6px 8px}
+td{padding:10px 6px;border-top:1px solid var(--grid);color:var(--ink2)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+td .fam{color:var(--muted);font-size:11px}
+.empty{color:var(--muted);font-size:13px;padding:14px 2px;text-align:center}
+footer{color:var(--muted);font-size:12px;text-align:center;padding-top:2px}
+footer .stale{color:var(--warn);font-weight:600}
+#all{transition:opacity .2s}
+.offline{background:var(--surface);border:1px solid var(--bad);color:var(--bad);
+  border-radius:11px;padding:9px 12px;font-size:13px;font-weight:600;display:none;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap" id="all">
+  <header>
+    <h1>pmq bot</h1>
+    <div class="pill"><span class="dot" id="stDot"></span><span id="stTxt">…</span><small id="stUp"></small></div>
+  </header>
+  <div class="offline" id="offline">connexion au Pi perdue, données figées</div>
+
+  <div class="card hero">
+    <h2 id="heroLbl">PnL aujourd'hui <span>(live · jour UTC)</span></h2>
+    <div class="big neu" id="heroVal">…</div>
+    <div class="sub" id="heroSub"></div>
+  </div>
+
+  <div class="tiles">
+    <div class="tile"><div class="lbl">Balance estimée</div><div class="val" id="tBal">…</div><div class="hint" id="tBalH"></div></div>
+    <div class="tile"><div class="lbl">Win rate</div><div class="val" id="tWr">…</div><div class="hint" id="tWrH"></div></div>
+    <div class="tile"><div class="lbl">PnL période</div><div class="val" id="tPnl">…</div><div class="hint" id="tPnlH"></div></div>
+    <div class="tile"><div class="lbl">Frais payés</div><div class="val" id="tFee">…</div><div class="hint" id="tFeeH"></div></div>
+  </div>
+
+  <div class="filters">
+    <div class="seg" id="segMode">
+      <button data-v="live">Live</button><button data-v="paper">Paper</button>
+    </div>
+    <div class="seg" id="segDays">
+      <button data-v="1">24h</button><button data-v="7">7j</button>
+      <button data-v="30">30j</button><button data-v="9999">Tout</button>
+    </div>
+  </div>
+
+  <div class="card chart">
+    <h2>Équité cumulée <span>($, fenêtres scorées)</span></h2>
+    <svg id="eqSvg"></svg><div class="tip" id="eqTip"></div>
+  </div>
+
+  <div class="card chart">
+    <h2>PnL par jour <span>($, jour UTC)</span></h2>
+    <svg id="dailySvg"></svg><div class="tip" id="dailyTip"></div>
+  </div>
+
+  <div class="card">
+    <h2>Dernières fenêtres</h2>
+    <div id="winTbl"></div>
+  </div>
+
+  <div class="card">
+    <h2>Derniers fills</h2>
+    <div id="fillTbl"></div>
+  </div>
+
+  <footer id="foot">chargement…</footer>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const state = {mode:"live", days:7, data:null};
+
+const money = (v, signed=true) =>
+  (signed && v > 0 ? "+" : "") + (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2)) + "$";
+const cls = v => v > 0.005 ? "pos" : v < -0.005 ? "negv" : "neu";
+const hm = ts => new Date(ts*1000).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
+const dayLbl = d => { const [y,m,dd] = d.split("-"); return dd + "/" + m; };
+const utcDay = ts => new Date(ts*1000).toISOString().slice(0,10);
+const ago = s => s < 90 ? Math.round(s)+"s" : s < 5400 ? Math.round(s/60)+"min" :
+  s < 172800 ? (s/3600).toFixed(1).replace(".0","")+"h" : Math.round(s/86400)+"j";
+
+function filtered(){
+  const d = state.data; if(!d) return [];
+  const since = d.now - state.days*86400;
+  return d.windows.filter(w => w.mode === state.mode && (w.scored_ts||0) >= since);
+}
+
+function renderStatus(){
+  const s = state.data.service, live = s.mode === "live", up = s.active === "active";
+  $("stDot").style.background = !up ? "var(--bad)" : live ? "var(--dot-good)" : "var(--s1)";
+  $("stTxt").textContent = !up ? "arrêté" : live ? "LIVE " + s.stake + "$" : "paper";
+  $("stUp").textContent = up && s.start_epoch ? "· " + ago(state.data.now - s.start_epoch) : "";
+}
+
+function renderHero(){
+  const d = state.data, today = utcDay(d.now);
+  const rows = d.windows.filter(w => w.mode === state.mode && utcDay(w.scored_ts||0) === today);
+  const pnl = rows.reduce((a,w) => a + (w.net_pnl||0), 0);
+  const wins = rows.filter(w => w.side === w.winner).length;
+  $("heroLbl").innerHTML = "PnL aujourd'hui <span>(" + state.mode + " · jour UTC)</span>";
+  $("heroVal").textContent = rows.length ? money(pnl) : "0.00$";
+  $("heroVal").className = "big " + cls(pnl);
+  $("heroSub").textContent = rows.length
+    ? rows.length + " fenêtre" + (rows.length>1?"s":"") + " · " + wins + "W/" + (rows.length-wins) + "L"
+    : "aucune fenêtre scorée aujourd'hui";
+}
+
+function renderTiles(){
+  const d = state.data, s = d.service, rows = filtered();
+  const wins = rows.filter(w => w.side === w.winner).length;
+  const pnl = rows.reduce((a,w) => a + (w.net_pnl||0), 0);
+  const fees = rows.reduce((a,w) => a + (w.fee||0), 0);
+  const per = state.days >= 9999 ? "tout" : state.days === 1 ? "24h" : state.days + "j";
+  if(s.collateral != null){
+    const extra = d.windows.filter(w => w.mode === "live" && (w.scored_ts||0) > (s.collateral_ts||0))
+                           .reduce((a,w) => a + (w.net_pnl||0), 0);
+    $("tBal").textContent = "~" + (s.collateral + extra).toFixed(2) + "$";
+    $("tBalH").textContent = "collatéral vu au démarrage " + (extra ? "+ scoré depuis" : "");
+  } else { $("tBal").textContent = "?"; $("tBalH").textContent = "visible en mode live"; }
+  $("tWr").textContent = rows.length ? Math.round(100*wins/rows.length) + "%" : "…";
+  $("tWrH").textContent = rows.length ? wins + "W/" + (rows.length-wins) + "L · " + state.mode + " " + per : "aucune fenêtre";
+  $("tPnl").textContent = money(pnl); $("tPnl").className = "val " + cls(pnl);
+  $("tPnlH").textContent = state.mode + " · " + per;
+  $("tFee").textContent = fees.toFixed(2) + "$";
+  $("tFeeH").textContent = "taker v2 · " + per;
+}
+
+/* ---------- charts (hand-rolled SVG, specs from the dataviz skill) ---------- */
+const NS = "http://www.w3.org/2000/svg";
+const el = (n, at) => { const e = document.createElementNS(NS, n);
+  for(const k in at) e.setAttribute(k, at[k]); return e; };
+function ticks(lo, hi, n){
+  if(hi - lo < 1e-9){ hi = lo + 1; lo = lo - 1; }
+  const span = (hi-lo)/n, mag = Math.pow(10, Math.floor(Math.log10(span)));
+  const step = [1,2,2.5,5,10].map(x=>x*mag).find(x => span <= x) || 10*mag;
+  const out = []; for(let v = Math.ceil(lo/step)*step; v <= hi + 1e-9; v += step) out.push(v);
+  return out;
+}
+const PAD = {l:38, r:12, t:8, b:20};
+
+function renderEquity(){
+  const svg = $("eqSvg"), tip = $("eqTip"), rows = filtered().slice()
+    .sort((a,b) => (a.scored_ts||0) - (b.scored_ts||0));
+  svg.replaceChildren();
+  const W = svg.clientWidth || 320, H = 190; svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("height", H);
+  if(!rows.length){
+    const e = el("text",{x:W/2,y:H/2,"text-anchor":"middle"});
+    e.textContent = "aucune fenêtre sur la période";
+    svg.appendChild(e); return; }
+  let cum = 0; const pts = rows.map(w => ({t:w.scored_ts, v:(cum += w.net_pnl||0), w}));
+  const t0 = pts[0].t, t1 = pts[pts.length-1].t || t0+1;
+  const vals = pts.map(p=>p.v).concat([0]);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  const padV = Math.max((hi-lo)*0.12, 0.05); lo -= padV; hi += padV;
+  const X = t => PAD.l + (W-PAD.l-PAD.r) * (t1===t0 ? 0.5 : (t-t0)/(t1-t0));
+  const Y = v => PAD.t + (H-PAD.t-PAD.b) * (1-(v-lo)/(hi-lo));
+  for(const tv of ticks(lo, hi, 3)){
+    svg.appendChild(el("line",{x1:PAD.l,x2:W-PAD.r,y1:Y(tv),y2:Y(tv),stroke:"var(--grid)","stroke-width":1}));
+    const t = el("text",{x:PAD.l-6,y:Y(tv)+3.5,"text-anchor":"end"}); t.textContent = money(tv,false); svg.appendChild(t);
+  }
+  if(lo < 0 && hi > 0)
+    svg.appendChild(el("line",{x1:PAD.l,x2:W-PAD.r,y1:Y(0),y2:Y(0),stroke:"var(--axis)","stroke-width":1}));
+  const nx = (t1 - t0) < 5400 ? 1 : 3;
+  let lastLbl = null;
+  for(let i=0;i<=nx;i++){ const tt = t0 + (t1-t0)*i/nx;
+    const txt = (t1-t0 > 2*86400)
+      ? new Date(tt*1000).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"}) : hm(tt);
+    if(txt === lastLbl) continue;
+    lastLbl = txt;
+    const t = el("text",{x:X(tt),y:H-5,"text-anchor":i===0?"start":i===nx?"end":"middle"});
+    t.textContent = txt;
+    svg.appendChild(t);
+  }
+  const line = pts.map((p,i)=>(i?"L":"M")+X(p.t).toFixed(1)+" "+Y(p.v).toFixed(1)).join(" ");
+  svg.appendChild(el("path",{d:line+`L${X(t1)} ${Y(Math.max(lo,0))} L${X(t0)} ${Y(Math.max(lo,0))} Z`,
+    fill:"var(--s1)","fill-opacity":.1,stroke:"none"}));
+  svg.appendChild(el("path",{d:line,fill:"none",stroke:"var(--s1)","stroke-width":2,
+    "stroke-linecap":"round","stroke-linejoin":"round"}));
+  const lp = pts[pts.length-1];
+  svg.appendChild(el("circle",{cx:X(lp.t),cy:Y(lp.v),r:4.5,fill:"var(--s1)",stroke:"var(--surface)","stroke-width":2}));
+  const endT = el("text",{x:Math.min(X(lp.t),W-PAD.r-4),y:Y(lp.v)-9,"text-anchor":"end",
+    "font-weight":600,fill:"var(--ink)","paint-order":"stroke",stroke:"var(--surface)","stroke-width":3});
+  endT.textContent = money(lp.v); svg.appendChild(endT);
+  // hover/touch: crosshair + tooltip, whole plot is the hit area
+  const cross = el("line",{y1:PAD.t,y2:H-PAD.b,stroke:"var(--axis)","stroke-width":1,visibility:"hidden"});
+  const cdot = el("circle",{r:4.5,fill:"var(--s1)",stroke:"var(--surface)","stroke-width":2,visibility:"hidden"});
+  svg.appendChild(cross); svg.appendChild(cdot);
+  const hit = el("rect",{x:0,y:0,width:W,height:H,fill:"transparent"});
+  svg.appendChild(hit);
+  const show = ev => {
+    const r = svg.getBoundingClientRect(), mx = (ev.clientX - r.left) * (W/r.width);
+    let best = pts[0], bd = 1e18;
+    for(const p of pts){ const d = Math.abs(X(p.t)-mx); if(d<bd){bd=d;best=p;} }
+    cross.setAttribute("x1",X(best.t)); cross.setAttribute("x2",X(best.t));
+    cross.setAttribute("visibility","visible");
+    cdot.setAttribute("cx",X(best.t)); cdot.setAttribute("cy",Y(best.v));
+    cdot.setAttribute("visibility","visible");
+    tip.innerHTML = new Date(best.t*1000).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"})
+      + " " + hm(best.t) + " · " + best.w.family.split("-")[0]
+      + " <b>" + money(best.w.net_pnl||0) + "</b> · cumul <b>" + money(best.v) + "</b>";
+    tip.style.display = "block";
+    const card = svg.parentElement.getBoundingClientRect();
+    const tx = Math.min(Math.max(ev.clientX - card.left - 60, 4), card.width - tip.offsetWidth - 4);
+    tip.style.left = tx + "px"; tip.style.top = "26px";
+  };
+  hit.addEventListener("pointermove", show);
+  hit.addEventListener("pointerdown", show);
+  hit.addEventListener("pointerleave", () => { tip.style.display="none";
+    cross.setAttribute("visibility","hidden"); cdot.setAttribute("visibility","hidden"); });
+}
+
+function renderDaily(){
+  const svg = $("dailySvg"), tip = $("dailyTip"), rows = filtered();
+  svg.replaceChildren();
+  const W = svg.clientWidth || 320, H = 170; svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
+  svg.setAttribute("height", H);
+  const by = {};
+  for(const w of rows){ const d = utcDay(w.scored_ts||0);
+    (by[d] = by[d] || {pnl:0,n:0,w:0}); by[d].pnl += w.net_pnl||0; by[d].n++;
+    if(w.side === w.winner) by[d].w++; }
+  const days = Object.keys(by).sort().slice(-31);
+  if(!days.length){ const e = el("text",{x:W/2,y:H/2,"text-anchor":"middle"});
+    e.textContent = "aucune fenêtre sur la période"; svg.appendChild(e); return; }
+  let lo = Math.min(0,...days.map(d=>by[d].pnl)), hi = Math.max(0,...days.map(d=>by[d].pnl));
+  const padV = Math.max((hi-lo)*0.15, 0.05); lo -= padV; hi += padV;
+  const Y = v => PAD.t + (H-PAD.t-PAD.b)*(1-(v-lo)/(hi-lo));
+  const band = (W-PAD.l-PAD.r)/days.length, bw = Math.min(24, Math.max(4, band-2));
+  for(const tv of ticks(lo,hi,3)){
+    svg.appendChild(el("line",{x1:PAD.l,x2:W-PAD.r,y1:Y(tv),y2:Y(tv),stroke:"var(--grid)","stroke-width":1}));
+    const t = el("text",{x:PAD.l-6,y:Y(tv)+3.5,"text-anchor":"end"}); t.textContent = money(tv,false); svg.appendChild(t);
+  }
+  svg.appendChild(el("line",{x1:PAD.l,x2:W-PAD.r,y1:Y(0),y2:Y(0),stroke:"var(--axis)","stroke-width":1}));
+  days.forEach((d,i)=>{
+    const v = by[d].pnl, x = PAD.l + band*i + (band-bw)/2;
+    const y0 = Y(0), y1 = Y(v), top = Math.min(y0,y1), h = Math.max(Math.abs(y0-y1),1.5);
+    const rUp = v >= 0 ? 4 : 0, rDn = v >= 0 ? 0 : 4, r = Math.min(4, bw/2, h);
+    // rounded data-end, square at the zero baseline
+    const path = v >= 0
+      ? `M${x} ${y0} L${x} ${top+r} Q${x} ${top} ${x+r} ${top} L${x+bw-r} ${top} Q${x+bw} ${top} ${x+bw} ${top+r} L${x+bw} ${y0} Z`
+      : `M${x} ${y0} L${x+bw} ${y0} L${x+bw} ${top+h-r} Q${x+bw} ${top+h} ${x+bw-r} ${top+h} L${x+r} ${top+h} Q${x} ${top+h} ${x} ${top+h-r} Z`;
+    svg.appendChild(el("path",{d:path, fill: v >= 0 ? "var(--s1)" : "var(--neg)"}));
+    if(days.length <= 10 || i % Math.ceil(days.length/6) === 0 || i === days.length-1){
+      const t = el("text",{x:x+bw/2,y:H-5,"text-anchor":"middle"});
+      t.textContent = dayLbl(d); svg.appendChild(t);
+    }
+    const hit = el("rect",{x:PAD.l+band*i,y:PAD.t,width:band,height:H-PAD.t-PAD.b,fill:"transparent"});
+    const show = ev => {
+      tip.innerHTML = dayLbl(d) + " · " + by[d].n + " fen. · " + by[d].w + "W/"
+        + (by[d].n-by[d].w) + "L <b>" + money(v) + "</b>";
+      tip.style.display = "block";
+      const card = svg.parentElement.getBoundingClientRect();
+      const tx = Math.min(Math.max(ev.clientX - card.left - 60, 4), card.width - tip.offsetWidth - 4);
+      tip.style.left = tx + "px"; tip.style.top = "26px";
+    };
+    hit.addEventListener("pointermove", show);
+    hit.addEventListener("pointerdown", show);
+    hit.addEventListener("pointerleave", () => tip.style.display = "none");
+    svg.appendChild(hit);
+  });
+  // selective direct labels: extreme + last day only
+  const ext = days.reduce((a,d)=>Math.abs(by[d].pnl)>Math.abs(by[a].pnl)?d:a, days[0]);
+  for(const d of new Set([ext, days[days.length-1]])){
+    const i = days.indexOf(d), v = by[d].pnl;
+    if(Math.abs(v) < 0.005) continue;
+    const t = el("text",{x:PAD.l+band*i+band/2, y:v>=0?Y(v)-5:Y(v)+13, "text-anchor":"middle",
+      "font-weight":600, fill:"var(--ink)","paint-order":"stroke",stroke:"var(--surface)","stroke-width":3});
+    t.textContent = money(v); svg.appendChild(t);
+  }
+}
+
+function renderTables(){
+  const rows = filtered().slice(-14).reverse();
+  $("winTbl").innerHTML = !rows.length ? '<div class="empty">aucune fenêtre sur la période</div>' :
+    '<table><tr><th>Fenêtre</th><th>Côté</th><th class="num">Entrée</th><th class="num">Net</th></tr>'
+    + rows.map(w => {
+      const won = w.side === w.winner, net = w.net_pnl||0;
+      return '<tr><td>' + hm(w.window) + '<div class="fam">' + (w.family||"").split("-")[0]
+        + ' · ' + dayLbl(utcDay(w.scored_ts||0)) + '</div></td><td>' + (w.side||"?")
+        + (won ? " ✓" : " ✗") + '</td><td class="num">' + (w.avg_price!=null?w.avg_price.toFixed(3):"?")
+        + '</td><td class="num ' + cls(net) + '">' + money(net) + '</td></tr>';
+    }).join("") + '</table>';
+  const d = state.data, since = d.now - state.days*86400;
+  const fills = d.fills.filter(f => f.mode === state.mode && (f.ts||0) >= since).slice(-10).reverse();
+  $("fillTbl").innerHTML = !fills.length ? '<div class="empty">aucun fill sur la période</div>' :
+    '<table><tr><th>Heure</th><th>Côté</th><th class="num">Prix</th><th class="num">Montant</th></tr>'
+    + fills.map(f => '<tr><td>' + hm(f.ts) + '<div class="fam">' + (f.family||"").split("-")[0]
+      + '</div></td><td>' + (f.side||"?") + '</td><td class="num">'
+      + (f.price!=null?f.price.toFixed(3):"?") + '</td><td class="num">'
+      + (f.notional!=null?f.notional.toFixed(2):"?") + '$</td></tr>').join("") + '</table>';
+}
+
+function renderFoot(ok){
+  const d = state.data, s = d.service;
+  let stale = "";
+  if(s.active === "active" && s.last_log_ts && d.now - s.last_log_ts > 1500)
+    stale = ' · <span class="stale">journal muet depuis ' + ago(d.now - s.last_log_ts) + '</span>';
+  $("foot").innerHTML = "maj " + new Date().toLocaleTimeString("fr-FR")
+    + " · dernier log il y a " + (s.last_log_ts ? ago(d.now - s.last_log_ts) : "?") + stale;
+  $("offline").style.display = ok ? "none" : "block";
+}
+
+function renderAll(ok=true){
+  if(!state.data) return;
+  renderStatus(); renderHero(); renderTiles();
+  renderEquity(); renderDaily(); renderTables(); renderFoot(ok);
+}
+
+async function refresh(){
+  $("all").style.opacity = .6;
+  try{
+    const r = await fetch("/api/data", {cache:"no-store"});
+    state.data = await r.json();
+    renderAll(true);
+  }catch(e){ if(state.data) renderAll(false); else $("foot").textContent = "Pi injoignable"; }
+  $("all").style.opacity = 1;
+}
+
+for(const [id, key] of [["segMode","mode"],["segDays","days"]])
+  $(id).addEventListener("click", ev => {
+    const b = ev.target.closest("button"); if(!b) return;
+    state[key] = key === "days" ? +b.dataset.v : b.dataset.v;
+    for(const x of $(id).children) x.classList.toggle("on", x === b);
+    renderAll();
+  });
+document.querySelector('#segMode [data-v="live"]').classList.add("on");
+document.querySelector('#segDays [data-v="7"]').classList.add("on");
+
+let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(renderAll, 150); });
+document.addEventListener("visibilitychange", () => { if(!document.hidden) refresh(); });
+setInterval(refresh, 30000);
+refresh();
+</script>
+</body>
+</html>
