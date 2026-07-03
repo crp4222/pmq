@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.crp4222/pmq",
   "title": "pmq (Polymarket CLOB V2)",
-  "description": "Fail-closed Polymarket CLOB V2 data and execution. Read tools (markets, book, fees, account) need no credentials; trading tools are registered only when the operator sets PMQ_MCP_LIVE=1, with a per-order USD cap.",
+  "description": "Fail-closed Polymarket CLOB V2 data and execution; trading tools gated behind PMQ_MCP_LIVE=1.",
   "repository": {
     "url": "https://github.com/crp4222/pmq",
     "source": "github"
