@@ -84,3 +84,14 @@ def test_book_inferred_winner():
     assert book_inferred_winner(0.02, 0.91) == "b"
     assert book_inferred_winner(0.60, 0.35) is None
     assert book_inferred_winner(None, None) is None
+
+
+def test_doctor_pure_logic():
+    from pmq.doctor import advise_sig_type, looks_like_minimal_proxy
+    assert looks_like_minimal_proxy("0x363d3d373d3d363d6020366004")
+    assert not looks_like_minimal_proxy("0x")
+    assert not looks_like_minimal_proxy(None)
+    assert advise_sig_type(False, False, True)[0] == 0
+    assert advise_sig_type(True, True, False)[0] == 3
+    assert advise_sig_type(True, False, False)[0] is None
+    assert advise_sig_type(False, False, False)[0] is None

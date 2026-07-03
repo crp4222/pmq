@@ -54,6 +54,24 @@ settled, with the builder code visible in the calldata. Additionally, a weekly
 and the installed client surface, and opens an issue by itself if Polymarket
 drifts.
 
+## pmq-doctor: diagnose your setup in one command
+
+```bash
+pip install pmquant && pmq-doctor --market <slug>
+```
+
+It checks, in order: the installed client surface (introspection), your
+derived EOA, the funder wallet on-chain (`owner()` and bytecode: is it a
+deposit wallet?), whether `POLY_SIG_TYPE` matches the wallet type, whether
+the CLOB actually sees your collateral (and if not, WHICH sig_type does),
+and the target market's minimum size and tick. Real output on a real
+deposit-wallet account:
+
+![pmq-doctor output](docs/assets/pmq-doctor.svg)
+
+If you landed here from "the order signer address has to be the address of
+the API KEY" or a CLOB balance of 0 with funds on-chain: this is the tool.
+
 ## The contract: nothing is booked without exchange confirmation
 
 | Situation | What pmq does |
