@@ -66,12 +66,8 @@ def _run(cmd):
         return ""
 
 
-def service_state():
-    """bot systemd state + last collateral line from its journal."""
-    with _lock:
-        cached = _cache.get("svc")
-        if cached and time.time() - cached[0] < SVC_CACHE_S:
-            return cached[1]
+def _systemd_props():
+    """systemctl show fields: props dict, effective env tokens, start epoch."""
     out = _run(["systemctl", "show", SERVICE, "-p", "ActiveState",
                 "-p", "SubState", "-p", "ActiveEnterTimestamp",
                 "-p", "Environment"])
@@ -89,10 +85,15 @@ def service_state():
                                                     "%a %Y-%m-%d %H:%M:%S"))
         except ValueError:
             pass
-    collateral = collateral_ts = None
+    return props, envtok, start_epoch
+
+
+def _journal_tail():
+    """Last collateral republication and last log timestamp from the journal."""
     jout = _run(["journalctl", "-u", SERVICE, "-o", "short-unix",
                  "-n", "1500", "--no-pager", "-q"])
     lines = jout.splitlines()
+    collateral = collateral_ts = None
     for line in reversed(lines):
         # matches both the startup line and the per-scoring republication
         if "collateral" in line:
@@ -108,6 +109,17 @@ def service_state():
             last_log_ts = float(lines[-1].split(" ", 1)[0])
         except (ValueError, IndexError):
             pass
+    return collateral, collateral_ts, last_log_ts
+
+
+def service_state():
+    """bot systemd state + last collateral line from its journal."""
+    with _lock:
+        cached = _cache.get("svc")
+        if cached and time.time() - cached[0] < SVC_CACHE_S:
+            return cached[1]
+    props, envtok, start_epoch = _systemd_props()
+    collateral, collateral_ts, last_log_ts = _journal_tail()
     svc = {
         "active": props.get("ActiveState", "unknown"),
         "sub": props.get("SubState", ""),

@@ -32,7 +32,10 @@ agents EDITING it. Read both before changing code.)
 
 ## Working rules
 
-* Tests green (`pytest -q`) and `ruff check .` clean before any push; add
+* Tests green (`pytest -q`) and `ruff check .` clean before any push;
+  `pyscn check src/pmq bot-template` (complexity <= 10, no dead code)
+  must stay green too; clone warnings are informational (the template
+  dash deliberately duplicates helpers to stay stdlib-standalone). add
   tests with every behavior change. Network-touching tests go to
   `tests/test_canary_live.py` behind `PMQ_CANARY=1`, never in default CI.
 * Exchange rules (min size, tick, fee rate) are READ from the venue

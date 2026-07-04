@@ -171,7 +171,7 @@ class PolymarketExecutor:
         log.info("executor ready (builder=%s)", "on" if builder_code else "off")
 
     # ---------------- introspection guard ----------------
-    def _verify_client_surface(self) -> None:
+    def _surface_drifts(self) -> list[str]:
         drifts: list[str] = []
         for name, params in _EXPECTED_METHODS.items():
             fn = getattr(self.client, name, None)
@@ -185,18 +185,17 @@ class PolymarketExecutor:
             for p in params:
                 if p not in have:
                     drifts.append(f"{name}() lost parameter {p}")
-        margs = self._t["MarketOrderArgs"]
-        have = set(inspect.signature(margs).parameters)
-        for p in _EXPECTED_MARKET_ARGS:
-            if p not in have:
-                drifts.append(f"MarketOrderArgsV2 lost field {p}")
-        oargs = self._t["OrderArgs"]
-        have = set(inspect.signature(oargs).parameters)
-        for p in _EXPECTED_ORDER_ARGS:
-            if p not in have:
-                drifts.append(f"OrderArgsV2 lost field {p}")
+        for label, ctor, expected in (
+                ("MarketOrderArgsV2", self._t["MarketOrderArgs"], _EXPECTED_MARKET_ARGS),
+                ("OrderArgsV2", self._t["OrderArgs"], _EXPECTED_ORDER_ARGS)):
+            have = set(inspect.signature(ctor).parameters)
+            drifts += [f"{label} lost field {p}" for p in expected if p not in have]
         if not hasattr(self._t["OrderType"], "FAK"):
             drifts.append("OrderType.FAK missing")
+        return drifts
+
+    def _verify_client_surface(self) -> None:
+        drifts = self._surface_drifts()
         if drifts:
             raise IntrospectionMismatch(
                 "installed py-clob-client-v2 drifted from the verified surface: "

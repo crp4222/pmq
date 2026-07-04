@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+* Quality pass driven by pyscn (CFG complexity, dead code, clones): the
+  template engine loop and pmq-doctor were split into single-purpose phase
+  functions (worst cyclomatic complexity 36 -> 10 across the repo, zero dead
+  code, behavior identical), and the previously untested template main loop
+  is now pinned by 17 end-to-end tests (fake clock, stubbed exchange):
+  paper fills at the real ask, budget headroom, halts, poisoning,
+  consecutive-failure exit, exchange-truth scoring. 113 tests total.
+  `pyscn check src/pmq bot-template` passes at default thresholds.
+
 ## 0.4.2 (2026-07-03)
 
 * Fix: `buy_fak`/`sell_fak` cent-rounding used `int(x * 100) / 100`, which
