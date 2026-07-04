@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.6 (2026-07-04)
+
+* Fix: `trades_totals` overcounted MAKER-role fills. V2 bundles a taker
+  order matched against several makers into ONE trade record whose
+  top-level `size` is the counterparty's aggregate; our actual fill lives
+  in the `maker_orders` slices. Discovered live during the maker-receipt
+  run (a 5-share resting bid reported as 26.46 bought shares, making the
+  sell-back attempt oversized). The method now sums only the slices whose
+  `maker_address` matches the funder (top-level size kept as fallback for
+  slice-less records); the real settlement record is the test fixture.
+  Taker accounting is unchanged. The executor now stores `funder`; set
+  POLY_FUNDER even on sig 0 accounts if you post resting orders.
+* Docs: maker-path production receipt in the README (GTC posted above the
+  bid, matched as MAKER at zero fee, on-chain settlement tx).
+
 ## 0.4.5 (2026-07-04)
 
 * Startup guard against the fine-tick market-order rejection class: the

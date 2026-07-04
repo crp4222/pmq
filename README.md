@@ -66,7 +66,12 @@ want to see it on-chain, here is a settlement from one of my wallets
 (2026-07-03):
 [`0x387f5f09...100d88a8`](https://polygonscan.com/tx/0x387f5f09c031bb36a71c54adc978b1ed4d50c67f6dd3f0c2c8068391100d88a8)
 on the CTF Exchange V2: a FAK market buy built by this library, matched and
-settled, with the builder code visible in the calldata. A weekly
+settled, with the builder code visible in the calldata. The maker path has
+its own receipt (2026-07-04): a `limit_gtc` posted one tick above the bid,
+matched as MAKER at zero fee and settled in
+[`0x1b60f19a...c35d09`](https://polygonscan.com/tx/0x1b60f19a6f089624f27babb58bf82538c49f044ee83778783195e26a33c35d09),
+where the `maker_orders` slice accounting that release 0.4.6 encodes is
+visible in the raw trade record. A weekly
 [canary workflow](.github/workflows/canary.yml) exercises the real endpoints
 and the installed client surface, and opens an issue by itself if Polymarket
 drifts.
@@ -142,10 +147,11 @@ else:
         print(fill.matched_shares, "shares at", fill.price, "order", fill.order_id)
 ```
 
-`sell_fak` and `limit_gtc` follow the same contract. Both FAK paths have
-carried real volume: a production round trip (buy 5.149 @ 0.94, sell back
-5.14 @ 0.94, cross-checked via `get_trades`) confirmed the mirrored
-`makingAmount`/`takingAmount` semantics on 2026-07-03.
+`sell_fak` and `limit_gtc` follow the same contract, and all three paths
+have carried production volume: a FAK round trip (buy 5.149 @ 0.94, sell
+back 5.14 @ 0.94, cross-checked via `get_trades`, 2026-07-03) and a GTC
+maker fill (posted above the bid, matched as MAKER at zero fee,
+2026-07-04, settlement tx in the section above).
 
 ## The signature_type table nobody gives you
 
@@ -271,9 +277,9 @@ handle you can pull, whenever you care to:
   Nothing changes silently.
 * Deprecated APIs keep working and warn for at least one MINOR release
   before removal.
-* The bar for 1.0, stated in advance: months of green weekly canaries, the
-  maker path (`limit_gtc`) production-proven with real volume the way the
-  FAK paths already are, and external production users.
+* The bar for 1.0, stated in advance: months of green weekly canaries and
+  external production users. (The maker path joined the FAK paths in the
+  production-proven column on 2026-07-04, receipt above.)
 * Bus-factor honesty: one maintainer, who trades real money through this
   exact code daily (strongest available incentive to keep it correct). The
   mitigations are structural, not promises: five small modules, the
