@@ -9,8 +9,12 @@ agents EDITING it. Read both before changing code.)
    confirmed (`orderID` + `success is not False` + matched amounts); 4xx is a
    clean rejection; timeout/5xx raises `OrderUncertain`; unparseable = zero.
    Any change that books more optimistically is a regression by definition,
-   whatever it fixes elsewhere. `reconcile()` must keep meaning cancel +
-   `get_trades` truth.
+   whatever it fixes elsewhere. Matched amounts must be finite and
+   non-negative (json.loads accepts NaN/Infinity; hostile values book zero).
+   `reconcile()` must keep meaning cancel + `get_trades` truth. The
+   hypothesis fuzz suite (tests/test_fill_fuzz.py) pins all of this with
+   generated adversarial responses: extend it with every parser change,
+   never delete it.
 2. **Startup introspection** (`_EXPECTED_METHODS`/`_EXPECTED_MARKET_ARGS`):
    the executor REFUSES to run on a drifted py-clob-client-v2. When bumping
    the client dependency, re-verify signatures by introspection and update
@@ -32,16 +36,34 @@ agents EDITING it. Read both before changing code.)
 
 ## Working rules
 
-* Tests green (`pytest -q`) and `ruff check .` clean before any push; add
+* Tests green (`pytest -q`) and `ruff check .` clean before any push;
+  `pyscn check src/pmq bot-template` (complexity <= 10, no dead code)
+  must stay green too; clone warnings are informational (the template
+  dash deliberately duplicates helpers to stay stdlib-standalone). Add
   tests with every behavior change. Network-touching tests go to
   `tests/test_canary_live.py` behind `PMQ_CANARY=1`, never in default CI.
 * Exchange rules (min size, tick, fee rate) are READ from the venue
   (`book_meta`, `fee_rate`), not hardcoded. `FEE_RATES` is a documented
   snapshot of the official schedule used for estimates.
-* Releases: bump version in `pyproject.toml` AND `src/pmq/__init__.py`,
-  update CHANGELOG.md, push, then `gh release create vX.Y.Z`: PyPI publish
-  is automatic via trusted publishing (no tokens anywhere). PyPI name is
-  `pmquant`, import name `pmq`: keep the README line explaining it.
+* Releases: bump version in `pyproject.toml`, `src/pmq/__init__.py` AND
+  `server.json` (both version fields), update CHANGELOG.md, push, then
+  `gh release create vX.Y.Z`: PyPI publish (trusted publishing, signed
+  attestations) and the MCP registry republish (mcp-publish.yml,
+  github-oidc) both fire on the release event. Registry gotchas: the
+  server.json description caps at 100 characters, and the version must
+  exist on PyPI. PyPI name is `pmquant`, import name `pmq`: keep the
+  README line explaining it.
+* CLAUDE.md and CONTRIBUTING.md are THE SAME FILE by contract: after
+  editing one, copy it over the other in the same commit (`cp CLAUDE.md
+  CONTRIBUTING.md`). Drift between them means an agent read stale rules.
+* Local guard: `git config core.hooksPath .githooks` once per clone
+  enables the pre-push hook (ruff + mypy + pytest). CI is the backstop,
+  but the hook catches a broken push before it lands.
+* GitHub Actions stay pinned by commit SHA (dependabot bumps them); new
+  workflows get an explicit least-privilege permissions block. The egress
+  test and pip-audit ride the weekly canary: never move them to default CI
+  (they need network) and never widen the egress allowlist beyond
+  polymarket.com without updating SECURITY.md and the README section.
 * The weekly canary workflow is the drift alarm: if it opens an issue, the
   fix starts by re-running the introspection against the new surface, not
   by loosening the checks.
