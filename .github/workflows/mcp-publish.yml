@@ -18,7 +18,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release download --repo modelcontextprotocol/registry \
-            --pattern "*linux_amd64.tar.gz" --output mp.tgz
+            --pattern "mcp-publisher_*linux_amd64.tar.gz" --output mp.tgz
           tar -xzf mp.tgz
           ./mcp-publisher --version
       - name: Publish server.json to the MCP registry
