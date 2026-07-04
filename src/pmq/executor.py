@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import math
 import os
 import re
 from dataclasses import dataclass, field
@@ -243,6 +244,9 @@ class PolymarketExecutor:
             taking = float(resp.get("takingAmount") or 0.0)
         except (TypeError, ValueError):
             making = taking = 0.0
+        if not (math.isfinite(making) and math.isfinite(taking)) \
+                or making < 0 or taking < 0:
+            making = taking = 0.0    # NaN/inf/negative amounts book nothing
         usd, shares = (making, taking) if side == "BUY" else (taking, making)
         return Fill(order_id=str(resp["orderID"]), matched_shares=shares,
                     matched_usd=usd, raw=resp)

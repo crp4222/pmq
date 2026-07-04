@@ -327,3 +327,14 @@ def test_private_key_never_appears_in_logs(monkeypatch, caplog):
     with caplog.at_level(logging.DEBUG):
         PolymarketExecutor(key=secret, derive_creds=False)
     assert secret not in caplog.text and "7" * 64 not in caplog.text
+
+
+def test_nan_inf_negative_amounts_book_zero():
+    """json.loads accepts NaN/Infinity; a drifted or hostile response must
+    still book nothing (finite non-negative amounts only)."""
+    for bad in ("NaN", "Infinity", "-5", float("nan"), float("inf"), -3.0):
+        ex = make(FakeClient(market_resp={"orderID": "0x1", "success": True,
+                                          "makingAmount": bad,
+                                          "takingAmount": "5.0"}))
+        f = ex.buy_fak("tok", 0.97, 5.0)
+        assert not f and f.matched_usd == 0.0 and f.matched_shares == 0.0
