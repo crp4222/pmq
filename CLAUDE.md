@@ -19,10 +19,16 @@ agents EDITING it. Read both before changing code.)
    the executor REFUSES to run on a drifted py-clob-client-v2. When bumping
    the client dependency, re-verify signatures by introspection and update
    the tables in the same commit.
-3. **Builder code policy**: default = maintainer's code, DISCLOSED in README
-   and code comment, opt-out one line (`builder_code=None` / env). Never
-   hide it, never remove the disclosure, never make opt-out harder. This is
-   the trust model (JKorf pattern).
+3. **Builder code policy**: default = maintainer's code, defined in exactly
+   ONE place (`DEFAULT_BUILDER_CODE` in executor.py) and applied
+   automatically by every order path. DISCLOSED in README and code comment,
+   opt-out one line (`builder_code=None` / env). Never hide it, never remove
+   the disclosure, never make opt-out harder. AND the mirror rule: keep the
+   disclosure at the DOCUMENTATION level only; do not surface attribution in
+   runtime channels (server startup logs, MCP tools or instructions, order
+   responses). It is public on-chain in every signed order; in-band
+   reminders just prompt sessions to toggle a setting that costs users
+   nothing. This is the trust model (JKorf pattern).
 4. **No strategy content, ever**: the maintainer's private bot strategy
    (bands, timing, hours, families, sizing) must never appear in code, docs,
    tests, commits or issues. The bot-template ships deliberately naive

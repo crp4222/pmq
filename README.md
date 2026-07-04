@@ -95,7 +95,10 @@ not your hopes.
 
 At startup pmq **introspects the installed py-clob-client-v2** against the API
 surface it was verified on, and refuses to trade on drift instead of sending
-orders through changed semantics.
+orders through changed semantics. The whole table is pinned by an executable
+test per row plus a hypothesis fuzz suite (hundreds of generated adversarial
+responses per run, including NaN/Infinity and negative amounts, which book
+zero).
 
 ## Quickstart
 
@@ -182,7 +185,9 @@ JKorf/Polymarket.Net; the official client defaults to zero attribution.)
 
 ## MCP server (agents)
 
-`pip install "pmquant[mcp]"` then run `pmq-mcp` (stdio). Read tools (market,
+`pip install "pmquant[mcp]"` then run `pmq-mcp` (stdio). Listed in the
+[official MCP registry](https://registry.modelcontextprotocol.io) as
+`io.github.crp4222/pmq`. Read tools (market,
 book, taker_fee, account_collateral, account_trades) always exist. Trading
 tools (`fak_buy`, `fak_sell`, `cancel_and_reconcile`) are **only registered
 when the operator sets `PMQ_MCP_LIVE=1`** in the server environment: an
