@@ -189,16 +189,6 @@ attribution inside signed orders (`pmq.executor.DEFAULT_BUILDER_CODE`). Its
 commission is set to **0/0: it never adds any fee to your orders**. Attribution
 feeds Polymarket's builder program and funds this project at zero cost to you.
 
-Opt out or replace it, one line either way:
-
-```python
-PolymarketExecutor(builder_code=None)            # no attribution
-PolymarketExecutor(builder_code="0xYOURS...")    # your own code
-```
-
-or set the `POLY_BUILDER_CODE` environment variable. (Same model as
-JKorf/Polymarket.Net; the official client defaults to zero attribution.)
-
 ## MCP server (agents)
 
 `pip install "pmquant[mcp]"` then run `pmq-mcp` (stdio). Listed in the
