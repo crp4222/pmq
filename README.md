@@ -21,7 +21,7 @@ do not exist until you create them, a cap per order, a daily buy budget.
 The model cannot widen any of this from inside a session.
 
 ```bash
-pip install pmquant        # distribution name pmquant, import name pmq
+pip install pmquant        # Python >= 3.10; distribution pmquant, import pmq
 ```
 
 (PyPI's similarity check reserves the bare name; the module you import is
@@ -30,8 +30,56 @@ pip install pmquant        # distribution name pmquant, import name pmq
 As of 2026-07-03 this is, to our knowledge, the **only maintained Python
 layer combining local CLOB V2 signing, an exchange-confirmed fill contract,
 and working deposit-wallet (POLY_1271) auth**. That claim is dated and
-falsifiable: the comparison table below names the alternatives and what each
-does instead; open an issue if it goes stale.
+falsifiable: [docs/comparison.md](docs/comparison.md) names the
+alternatives and what each does instead; open an issue if it goes stale.
+
+## Quickstart
+
+Market data needs no keys:
+
+```python
+import pmq
+
+m = pmq.parse_market(pmq.get_market("btc-updown-15m-1783062000"))
+book = pmq.get_book(m["token_a"])
+bid, bid_sz, ask, ask_sz = pmq.best_bid_ask(book)
+print(ask, pmq.band_ask_depth_usd(book, 0.90, 0.97))
+print(pmq.fee(price=0.95, shares=100))          # taker fee in $, crypto rate
+```
+
+Execution (reads `POLY_PRIVATE_KEY`, `POLY_FUNDER`, `POLY_SIG_TYPE` from the
+environment):
+
+```python
+from pmq import PolymarketExecutor, OrderUncertain
+
+ex = PolymarketExecutor()                        # signature_type=3 for the app's deposit wallet
+ex.require_collateral(5.0)                       # fail fast, with a diagnostic that names sig_type
+
+try:
+    fill = ex.buy_fak(token_id=m["token_a"], price_cap=0.95, usd=5.00)
+except OrderUncertain:
+    ex.reconcile(m["condition_id"], m["token_a"])   # exchange truth before anything else
+else:
+    if fill:                                     # book ONLY what matched
+        print(fill.matched_shares, "shares at", fill.price, "order", fill.order_id)
+```
+
+`sell_fak` and `limit_gtc` follow the same contract, and all three paths
+have carried production volume: a FAK round trip (buy 5.149 @ 0.94, sell
+back 5.14 @ 0.94, cross-checked via `get_trades`, 2026-07-03) and a GTC
+maker fill (posted above the bid, matched as MAKER at zero fee,
+2026-07-04, settlement tx in the production section below).
+
+## Scope, latency, requirements
+
+Python 3.10 to 3.14 (the CI matrix runs all five). Plain REST round trips,
+measured 2026-07-04 (medians of 5, residential fiber, Western Europe):
+resolve a market 76 ms, fetch a book 85 ms, sign + POST an order and get
+the exchange's answer 73 ms. Sub-second everywhere, built for second-scale
+strategies (the maintainer's bot polls 15-minute windows every 2.5 s); it
+is not a microsecond market-making stack: no websockets, no co-location,
+one HTTP call per action.
 
 ## Why this exists
 
@@ -110,8 +158,7 @@ the API KEY" or a CLOB balance of 0 with funds on-chain: this is the tool.
 | Unparseable matched amounts | zero booked (fail closed) |
 
 `reconcile(condition_id)` cancels anything resting, verifies nothing stayed
-open, and returns `(shares, usd, fees)` from `get_trades`: the exchange truth,
-not your hopes.
+open, and returns `(shares, usd, fees)` from `get_trades`: the exchange truth.
 
 At startup pmq **introspects the installed py-clob-client-v2** against the API
 surface it was verified on, and refuses to trade on drift instead of sending
@@ -120,45 +167,7 @@ test per row plus a hypothesis fuzz suite (hundreds of generated adversarial
 responses per run, including NaN/Infinity and negative amounts, which book
 zero).
 
-## Quickstart
-
-Market data needs no keys:
-
-```python
-import pmq
-
-m = pmq.parse_market(pmq.get_market("btc-updown-15m-1783062000"))
-book = pmq.get_book(m["token_a"])
-bid, bid_sz, ask, ask_sz = pmq.best_bid_ask(book)
-print(ask, pmq.band_ask_depth_usd(book, 0.90, 0.97))
-print(pmq.fee(price=0.95, shares=100))          # taker fee in $, crypto rate
-```
-
-Execution (reads `POLY_PRIVATE_KEY`, `POLY_FUNDER`, `POLY_SIG_TYPE` from the
-environment):
-
-```python
-from pmq import PolymarketExecutor, OrderUncertain
-
-ex = PolymarketExecutor()                        # signature_type=3 for the app's deposit wallet
-ex.require_collateral(5.0)                       # fail fast, with a diagnostic that names sig_type
-
-try:
-    fill = ex.buy_fak(token_id=m["token_a"], price_cap=0.95, usd=5.00)
-except OrderUncertain:
-    ex.reconcile(m["condition_id"], m["token_a"])   # exchange truth before anything else
-else:
-    if fill:                                     # book ONLY what matched
-        print(fill.matched_shares, "shares at", fill.price, "order", fill.order_id)
-```
-
-`sell_fak` and `limit_gtc` follow the same contract, and all three paths
-have carried production volume: a FAK round trip (buy 5.149 @ 0.94, sell
-back 5.14 @ 0.94, cross-checked via `get_trades`, 2026-07-03) and a GTC
-maker fill (posted above the bid, matched as MAKER at zero fee,
-2026-07-04, settlement tx in the section above).
-
-## The signature_type table nobody gives you
+## The signature_type decoder table
 
 | `signature_type` | Wallet | When it is yours |
 |---|---|---|
@@ -172,20 +181,13 @@ address, your `signature_type` is wrong. Debug trick: `eth_call` `owner()`
 (`0x8da5cb5b`) on the funder; if it returns your EOA and the wallet bytecode is
 an ERC-1167 proxy, you want `signature_type=3`.
 
-## Comparison (2026-07-03, factual)
+## Alternatives
 
-| | pmq | py-clob-client-v2 (official) | pmxt | NautilusTrader | caiovicentino MCP |
-|---|---|---|---|---|---|
-| CLOB V2 signing | yes, local | yes, local | writes via its hosted backend | yes, local | V1 only (rejected in prod since 2026-04-28) |
-| Confirmed-fill contract | yes (core design) | no (raw responses) | n/a | engine-level | no |
-| Deposit wallet / POLY_1271 | yes, production-proven | open issues (#70 and others) | n/a | untested claim | no |
-| Fee math | official per-category formula | fee at match, no helper | via backend | fee model | fee-blind |
-| Reconciliation helper | yes | no | n/a | engine-level | no |
-| Footprint | one small lib | one small lib | multi-venue platform | full trading framework | MCP server |
-
-NautilusTrader is excellent if you want a full framework; pmq is the small
-library you embed in your own bot. pmxt is convenient if you accept routing
-writes through their backend; pmq exists for self-custody.
+NautilusTrader if you want a full backtesting and trading framework; pmxt
+if you accept routing writes through a hosted backend; raw
+py-clob-client-v2 if you want no opinion layered on the official client.
+The dated feature-by-feature table (written by an interested party, every
+row checkable) lives in [docs/comparison.md](docs/comparison.md).
 
 ## Builder code disclosure
 
@@ -294,25 +296,12 @@ handle you can pull, whenever you care to:
 
 ## Stability and maintenance
 
-* Pre-1.0 SemVer: PATCH releases only fix, MINOR releases may change the
-  public API with the migration named in [CHANGELOG.md](CHANGELOG.md).
-  Nothing changes silently.
-* Deprecated APIs keep working and warn for at least one MINOR release
-  before removal.
-* The bar for 1.0, stated in advance: months of green weekly canaries and
-  external production users. (The maker path joined the FAK paths in the
-  production-proven column on 2026-07-04, receipt above.)
-* Bus-factor honesty: one maintainer, who trades real money through this
-  exact code daily (strongest available incentive to keep it correct). The
-  mitigations are structural, not promises: five small modules, the
-  executable fill-contract test table, a weekly canary that opens issues by
-  itself, SHA-pinned CI. Operational rule: if the canary badge goes red and
-  stays red, treat the project as unmaintained and pin your last known-good
-  version.
-* Help wanted, precisely scoped: production receipts for `signature_type`
-  1 and 2 accounts (legacy Magic/email and browser-wallet proxies). Both
-  paths are introspection-tested but have never carried real money through
-  this library; the maintainer's own accounts are all types 0 and 3.
+Pre-1.0 SemVer with a written deprecation window and a stated bar for 1.0;
+one maintainer, trading his own money through this exact code daily. The
+operational rule worth knowing: if the canary badge goes red and stays
+red, treat the project as unmaintained and pin your last known-good
+version. Full policy and the precisely scoped help-wanted:
+[docs/stability.md](docs/stability.md).
 
 ## License
 

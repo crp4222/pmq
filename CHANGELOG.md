@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+* README responds to an external review: quickstart moved right under the
+  install line, a measured "Scope, latency, requirements" section (median
+  REST round trips, Python 3.10-3.14, explicitly not an HFT stack), the
+  comparison table and the stability policy moved to docs/ behind
+  three-line digests (the comparison now names its author as an
+  interested party), and two salesy formulas toned down.
+
 ## 0.4.7 (2026-07-04)
 
 * MCP: `PMQ_MCP_DAILY_USD`, a cumulative BUY budget per UTC day on top of
