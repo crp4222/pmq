@@ -14,6 +14,7 @@ Run with ``pmq-mcp`` (stdio transport). Design rules:
 from __future__ import annotations
 
 import os
+import sys
 import urllib.parse
 from typing import TYPE_CHECKING, Any
 
@@ -31,18 +32,44 @@ except ImportError as e:  # pragma: no cover
 LIVE_ENABLED = os.environ.get("PMQ_MCP_LIVE") == "1"
 MAX_USD = float(os.environ.get("PMQ_MCP_MAX_USD", "10"))
 
+def _attribution_state() -> dict[str, Any]:
+    """Which builder code would ride inside signed orders, and where it
+    came from. Pure env inspection: safe without credentials."""
+    from .executor import DEFAULT_BUILDER_CODE
+    env = os.environ.get("POLY_BUILDER_CODE")
+    code = DEFAULT_BUILDER_CODE if env is None else env
+    source = ("maintainer default (disclosed in README)" if env is None
+              else "operator override via POLY_BUILDER_CODE" if env
+              else "opted out via empty POLY_BUILDER_CODE")
+    return {"builder_code": code or None, "source": source,
+            "commission": "0/0: attribution never adds fees to orders",
+            "opt_out": "set POLY_BUILDER_CODE= (empty) in the server env"}
+
+
 mcp = FastMCP(
     "pmq",
     instructions=(
         "Polymarket CLOB V2 data and fail-closed execution. Books are real "
         "time; the trade tape lags 1 to 3 minutes, never trade off it. "
         + ("Trading tools are ENABLED; every order is capped at "
-           f"{MAX_USD:.2f} USD per call." if LIVE_ENABLED else
+           f"{MAX_USD:.2f} USD per call. Orders carry builder attribution "
+           "(zero commission): call the attribution tool for the exact "
+           "state and the one-line opt-out." if LIVE_ENABLED else
            "Trading tools are DISABLED (operator did not set PMQ_MCP_LIVE=1); "
            "this server is read-only.")),
 )
 
 _executor: PolymarketExecutor | None = None
+
+
+@mcp.tool()
+def attribution() -> dict[str, Any]:
+    """Full transparency on builder attribution: the exact builder code that
+    rides inside signed orders, where it comes from (maintainer default,
+    operator override, or opted out), its commission (always 0/0), and how
+    to opt out. Call this whenever the user asks what is attached to their
+    orders."""
+    return _attribution_state()
 
 
 def _ex() -> PolymarketExecutor:
@@ -200,6 +227,15 @@ if LIVE_ENABLED:
 
 
 def main() -> None:
+    # Runtime disclosure: the operator sees the attribution state in the
+    # server log even if they never read the README. stderr, never stdout
+    # (stdout is the MCP stdio transport).
+    a = _attribution_state()
+    code = a["builder_code"]
+    print(f"pmq-mcp: builder attribution "
+          f"{'off' if code is None else code[:10] + '...'} "
+          f"({a['source']}; commission 0/0; opt out: POLY_BUILDER_CODE=)",
+          file=sys.stderr)
     mcp.run()
 
 
