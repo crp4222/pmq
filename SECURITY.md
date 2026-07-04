@@ -14,11 +14,12 @@
   matches the API surface pmq was verified against (introspection at startup),
   rather than signing through changed semantics.
 
-## Reading the source before trusting it
+## Small enough to read
 
-A documented wave of fake "polymarket bot" repositories steals private keys.
-pmq is deliberately small (five modules) so you can audit the entire execution
-path in minutes. Grep targets that settle the important questions fast:
+A documented wave of fake "polymarket bot" repositories steals private keys;
+pmq is deliberately small (five modules) so the entire execution path reads
+in minutes. For whoever wants the fast route, the grep targets that settle
+the important questions:
 `POLY_PRIVATE_KEY` (read once, passed to the official client), `builder_code`
 (the disclosure and the opt-out), `http` (every host contacted).
 

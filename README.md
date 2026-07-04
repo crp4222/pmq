@@ -48,13 +48,15 @@ a real error in live trading:
 
 The full write-up with reproduction details: [docs/war-story.md](docs/war-story.md).
 
-## Runs in production
+## Runs in production: my own money, daily
 
-The maintainer's own bot trades through this exact executor 24/7 with real
-money. Example receipt (2026-07-03): settlement transaction
+I built pmq for my own trading. It executes real volume with my funds every
+day, and it has never booked a fill the exchange did not confirm. If you
+want to see it on-chain, here is a settlement from one of my wallets
+(2026-07-03):
 [`0x387f5f09...100d88a8`](https://polygonscan.com/tx/0x387f5f09c031bb36a71c54adc978b1ed4d50c67f6dd3f0c2c8068391100d88a8)
 on the CTF Exchange V2: a FAK market buy built by this library, matched and
-settled, with the builder code visible in the calldata. Additionally, a weekly
+settled, with the builder code visible in the calldata. A weekly
 [canary workflow](.github/workflows/canary.yml) exercises the real endpoints
 and the installed client surface, and opens an issue by itself if Polymarket
 drifts.
@@ -215,49 +217,37 @@ shipped demo strategy is an API illustration meant to be replaced.
 * Keys are read from the environment, used to instantiate the signer, and
   never logged. No custody, no backend, no telemetry, zero network calls
   besides Polymarket endpoints.
-* Beware of the documented wave of fake "polymarket bot" repositories that
-  steal private keys. Read the source: pmq is small on purpose.
+* A documented wave of fake "polymarket bot" repositories steals private
+  keys; pmq is deliberately small so the entire execution path stays
+  readable in minutes by anyone who wants to look.
 * Fund the trading wallet with what you can afford to lose. Nothing here is
   financial advice; prediction-market access is restricted in some
   jurisdictions and compliance is on you.
 
-## Verify the claims yourself
+## If you feel like checking any of it
 
-Trust here is designed to be checkable, not asserted.
+None of the claims above require taking my word; each one comes with a
+handle you can pull, whenever you care to:
 
-**"Keys never leave your process."** The canary suite contains an egress
-test: it records every DNS resolution during a full session (market data,
-auth derivation, one signed order sent with a throwaway zero-fund key) and
-fails if any host outside `polymarket.com` is contacted. Run it yourself:
-
-```bash
-PMQ_CANARY=1 pytest tests/test_canary_live.py -k egress -s
-```
-
-It prints the complete observed host list (at the time of writing:
-`clob.polymarket.com`, `gamma-api.polymarket.com`, nothing else). The weekly
-canary runs it in public CI, so the
-[action logs](../../actions/workflows/canary.yml) show that list on
-infrastructure you do not have to trust us about. The only exception by
-design: `pmq-doctor`'s on-chain checks use the public Polygon RPCs named in
-its source. Pair this with the 15-second source audit in
-[SECURITY.md](SECURITY.md).
-
-**"The PyPI package is built from this repo."** Releases published through
-this repository's workflow carry a signed PEP 740 attestation (Sigstore, via
-PyPI trusted publishing). PyPI serves it on the files page ("provenance"
-next to each file) or raw:
-
-```bash
-curl -s https://pypi.org/integrity/pmquant/0.4.2/pmquant-0.4.2-py3-none-any.whl/provenance
-```
-
-The signing identity to expect is `crp4222/pmq`'s `publish.yml` workflow.
-For machine verification use the `pypi-attestations` package.
-
-**Dependencies are watched, not assumed.** Dependabot files weekly bump PRs
-(Python and pinned-by-SHA GitHub Actions), and the weekly canary runs
-`pip-audit` against the installed tree; a hit opens an issue by itself.
+* **Egress.** `PMQ_CANARY=1 pytest tests/test_canary_live.py -k egress -s`
+  records every DNS resolution during a full session (market data, auth
+  derivation, one signed order) and fails on any host outside
+  `polymarket.com`. Last observed list: `clob.polymarket.com`,
+  `gamma-api.polymarket.com`, nothing else. The weekly
+  [canary](../../actions/workflows/canary.yml) prints that list in public
+  CI logs. One designed exception: `pmq-doctor`'s optional on-chain checks
+  use the public Polygon RPCs named in its source.
+* **Provenance.** Releases carry a signed PEP 740 attestation (Sigstore,
+  via PyPI trusted publishing): click "provenance" next to any file on the
+  [PyPI files page](https://pypi.org/project/pmquant/#files), or fetch it
+  raw from PyPI's integrity API. The signing identity is this repository's
+  `publish.yml` workflow.
+* **Dependencies.** Dependabot files weekly bump PRs (Python and
+  SHA-pinned GitHub Actions), and the weekly canary runs `pip-audit`; a
+  hit opens an issue by itself.
+* **The source.** Five small modules; the whole execution path reads in
+  minutes. The grep targets that answer the important questions fastest
+  are listed in [SECURITY.md](SECURITY.md).
 
 ## Stability and maintenance
 
