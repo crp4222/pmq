@@ -36,8 +36,14 @@ examples leave several traps undocumented. Every line of pmq was paid for with
 a real error in live trading:
 
 * `invalid amounts, the market buy orders maker amount supports a max accuracy
-  of 2 decimals`: the CLOB treats FAK/FOK buys as **market orders**. pmq routes
-  them through the market-order builder with the correct rounding.
+  of 2 decimals, taker amount a max of 4 decimals`: the CLOB treats FAK/FOK
+  buys as **market orders** and caps their signed amounts at 2 decimals
+  (maker) / 4 decimals (taker) whatever the tick size. The official client's
+  rounding table allows 5-6 taker decimals on ticks finer than 0.01, so every
+  market order there is rejected; this cost us a production halt on
+  2026-07-04. pmq clamps the signed pair to the exchange caps (0.4.3) and
+  refuses at startup any client build that would still sign a rejectable
+  pair (0.4.5).
 * `no orders found to match with FAK order` (HTTP 400, yet with an `orderID`):
   a clean no-fill, not an error. pmq returns an empty `Fill` instead of crashing
   or, worse, retrying blindly.

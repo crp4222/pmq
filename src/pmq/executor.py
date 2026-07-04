@@ -218,7 +218,39 @@ class PolymarketExecutor:
             drifts += [f"{label} lost field {p}" for p in expected if p not in have]
         if not hasattr(self._t["OrderType"], "FAK"):
             drifts.append("OrderType.FAK missing")
+        drifts += self._amount_precision_drifts()
         return drifts
+
+    def _amount_precision_drifts(self) -> list[str]:
+        """Behavioral guard: the exchange caps signed MARKET-order amounts at
+        2 decimals (maker) and 4 (taker) whatever the tick size. Exercise the
+        installed builder's arithmetic on awkward pairs across every rounding
+        config; a client build that would sign a rejectable pair is refused
+        here, at startup, instead of failing on the first fine-tick order."""
+        try:
+            from py_clob_client_v2.order_builder.builder import (
+                ROUNDING_CONFIG,
+                OrderBuilder,
+            )
+            from py_clob_client_v2.order_builder.constants import BUY, SELL
+        except ImportError:
+            return []
+        out: set[str] = set()
+        probe = object.__new__(OrderBuilder)
+        cases = ((BUY, 9.98, 0.985), (BUY, 4.97, 0.983),
+                 (SELL, 10.13, 0.985), (SELL, 5.35, 0.933))
+        for tick, rc in ROUNDING_CONFIG.items():
+            for side, amount, price in cases:
+                try:
+                    _, mk, tk = OrderBuilder.get_market_order_amounts(
+                        probe, side, amount, price, rc)
+                except Exception as e:
+                    out.add(f"market amounts builder failed at tick {tick}: {e}")
+                    continue
+                if int(mk) % 10_000 or int(tk) % 100:
+                    out.add(f"market order would sign >2dp maker or >4dp taker "
+                            f"at tick {tick}")
+        return sorted(out)
 
     def _verify_client_surface(self) -> None:
         drifts = self._surface_drifts()

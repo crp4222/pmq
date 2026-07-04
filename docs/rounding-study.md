@@ -50,3 +50,21 @@ amounts against requested size, cross-checked with `get_trades`.
 4. The per-market minimum size is enforced server-side with a clean 400, and
    is readable in advance from the book response (`min_order_size`, exposed
    by `pmq.book_meta`).
+
+## Addendum (2026-07-04): fine-tick market orders
+
+The study above ran on a 0.01-tick market and point 1 turns out to hold
+only there. On 2026-07-04 a 0.001-tick market rejected every market buy
+with `invalid amounts ... taker amount a max of 4 decimals`: the client's
+ROUNDING_CONFIG allows amount decimals = price decimals + 2 (5 for tick
+0.001, 6 for 0.0025 and 0.0001). That is right for LIMIT orders, whose
+amounts are exact price×size products, but MARKET-order takers are capped
+by the server at a flat 4 decimals whatever the tick, so on fine ticks the
+maker/price division leaves a 5th decimal and the order can never be
+accepted. Normalization still happens client-side; it just normalizes to a
+precision the server refuses.
+
+pmq 0.4.3 clamps the market path to 4 decimals (round-down: the budget
+contract is intact, the dust given up is under 0.0001 share). pmq 0.4.5
+also refuses at startup any client build that would still sign such a
+pair, so this class of failure stops at deploy time, not at trade time.

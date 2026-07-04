@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.5 (2026-07-04)
+
+* Startup guard against the fine-tick market-order rejection class: the
+  introspection now exercises the installed builder's amount arithmetic
+  across every rounding config and refuses to construct an executor that
+  would sign a market pair above the exchange caps (2 decimal maker,
+  4 decimal taker). A client build that slips past the 0.4.3 clamp fails
+  at deploy time, before any order.
+* Honesty pass after the 2026-07-04 production halt: the README rounding
+  bullet now states the fine-tick failure mode and its dates, and
+  docs/rounding-study.md gains an addendum scoping the July 3 conclusions
+  to ticks >= 0.01.
+
 ## 0.4.4 (2026-07-04)
 
 * Harden: json.loads accepts NaN and Infinity, so a drifted or hostile

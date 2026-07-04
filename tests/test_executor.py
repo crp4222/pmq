@@ -362,3 +362,17 @@ def test_market_taker_amounts_clamped_to_4dp_on_fine_ticks():
         assert int(tk) % 10**2 == 0, f"taker >4dp at tick {tick}"
         _, mk_s, tk_s = fn(b, SELL, 10.13, 0.985, ROUNDING_CONFIG[tick])
         assert int(mk_s) % 10**4 == 0 and int(tk_s) % 10**2 == 0
+
+
+def test_startup_refuses_client_signing_dirty_market_amounts(monkeypatch):
+    """If a client build slips past the 4dp clamp (new code path, future
+    regression), the startup introspection must refuse to trade at all."""
+    from py_clob_client_v2.order_builder import builder as b
+
+    def dirty(self, side, amount, price, round_config):
+        return side, 9980000, 10131970          # taker 10.13197: 5 decimals
+
+    dirty._pmq_taker4 = True                    # defeat the pmq wrapper
+    monkeypatch.setattr(b.OrderBuilder, "get_market_order_amounts", dirty)
+    with pytest.raises(IntrospectionMismatch):
+        make(FakeClient())
