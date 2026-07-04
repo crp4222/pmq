@@ -22,6 +22,16 @@ path in minutes. Grep targets that settle the important questions fast:
 `POLY_PRIVATE_KEY` (read once, passed to the official client), `builder_code`
 (the disclosure and the opt-out), `http` (every host contacted).
 
+## Automated watch
+
+* Weekly canary CI runs the egress test (every DNS resolution during a full
+  session must stay inside polymarket.com) and `pip-audit` over the
+  dependency tree; any failure opens a labeled issue automatically.
+* Dependabot files weekly update PRs for Python dependencies and for the
+  GitHub Actions, which are pinned by commit SHA.
+* PyPI releases carry signed PEP 740 attestations (see "Verify the claims
+  yourself" in the README).
+
 ## Reporting a vulnerability
 
 Open a GitHub security advisory on this repository (Security tab, "Report a

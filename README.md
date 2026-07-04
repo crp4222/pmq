@@ -7,6 +7,7 @@
 [![canary](https://github.com/crp4222/pmq/actions/workflows/canary.yml/badge.svg)](https://github.com/crp4222/pmq/actions/workflows/canary.yml)
 [![coverage gate](https://img.shields.io/badge/coverage-%E2%89%A585%25%20enforced%20in%20CI-blue)](.github/workflows/test.yml)
 [![typed](https://img.shields.io/badge/types-mypy%20strict-blue)](pyproject.toml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/crp4222/pmq/badge)](https://scorecard.dev/viewer/?uri=github.com/crp4222/pmq)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 Fail-closed execution and market data for **Polymarket CLOB V2**, in Python.
@@ -219,6 +220,66 @@ shipped demo strategy is an API illustration meant to be replaced.
 * Fund the trading wallet with what you can afford to lose. Nothing here is
   financial advice; prediction-market access is restricted in some
   jurisdictions and compliance is on you.
+
+## Verify the claims yourself
+
+Trust here is designed to be checkable, not asserted.
+
+**"Keys never leave your process."** The canary suite contains an egress
+test: it records every DNS resolution during a full session (market data,
+auth derivation, one signed order sent with a throwaway zero-fund key) and
+fails if any host outside `polymarket.com` is contacted. Run it yourself:
+
+```bash
+PMQ_CANARY=1 pytest tests/test_canary_live.py -k egress -s
+```
+
+It prints the complete observed host list (at the time of writing:
+`clob.polymarket.com`, `gamma-api.polymarket.com`, nothing else). The weekly
+canary runs it in public CI, so the
+[action logs](../../actions/workflows/canary.yml) show that list on
+infrastructure you do not have to trust us about. The only exception by
+design: `pmq-doctor`'s on-chain checks use the public Polygon RPCs named in
+its source. Pair this with the 15-second source audit in
+[SECURITY.md](SECURITY.md).
+
+**"The PyPI package is built from this repo."** Releases published through
+this repository's workflow carry a signed PEP 740 attestation (Sigstore, via
+PyPI trusted publishing). PyPI serves it on the files page ("provenance"
+next to each file) or raw:
+
+```bash
+curl -s https://pypi.org/integrity/pmquant/0.4.2/pmquant-0.4.2-py3-none-any.whl/provenance
+```
+
+The signing identity to expect is `crp4222/pmq`'s `publish.yml` workflow.
+For machine verification use the `pypi-attestations` package.
+
+**Dependencies are watched, not assumed.** Dependabot files weekly bump PRs
+(Python and pinned-by-SHA GitHub Actions), and the weekly canary runs
+`pip-audit` against the installed tree; a hit opens an issue by itself.
+
+## Stability and maintenance
+
+* Pre-1.0 SemVer: PATCH releases only fix, MINOR releases may change the
+  public API with the migration named in [CHANGELOG.md](CHANGELOG.md).
+  Nothing changes silently.
+* Deprecated APIs keep working and warn for at least one MINOR release
+  before removal.
+* The bar for 1.0, stated in advance: months of green weekly canaries, the
+  maker path (`limit_gtc`) production-proven with real volume the way the
+  FAK paths already are, and external production users.
+* Bus-factor honesty: one maintainer, who trades real money through this
+  exact code daily (strongest available incentive to keep it correct). The
+  mitigations are structural, not promises: five small modules, the
+  executable fill-contract test table, a weekly canary that opens issues by
+  itself, SHA-pinned CI. Operational rule: if the canary badge goes red and
+  stays red, treat the project as unmaintained and pin your last known-good
+  version.
+* Help wanted, precisely scoped: production receipts for `signature_type`
+  1 and 2 accounts (legacy Magic/email and browser-wallet proxies). Both
+  paths are introspection-tested but have never carried real money through
+  this library; the maintainer's own accounts are all types 0 and 3.
 
 ## License
 

@@ -45,6 +45,11 @@ agents EDITING it. Read both before changing code.)
   update CHANGELOG.md, push, then `gh release create vX.Y.Z`: PyPI publish
   is automatic via trusted publishing (no tokens anywhere). PyPI name is
   `pmquant`, import name `pmq`: keep the README line explaining it.
+* GitHub Actions stay pinned by commit SHA (dependabot bumps them); new
+  workflows get an explicit least-privilege permissions block. The egress
+  test and pip-audit ride the weekly canary: never move them to default CI
+  (they need network) and never widen the egress allowlist beyond
+  polymarket.com without updating SECURITY.md and the README section.
 * The weekly canary workflow is the drift alarm: if it opens an issue, the
   fix starts by re-running the introspection against the new surface, not
   by loosening the checks.

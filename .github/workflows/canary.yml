@@ -12,8 +12,8 @@ jobs:
   canary:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
@@ -21,6 +21,10 @@ jobs:
         env:
           PMQ_CANARY: "1"
         run: pytest tests/test_canary_live.py -q
+      - name: Dependency vulnerability audit
+        run: |
+          pip install pip-audit
+          pip-audit --skip-editable
       - name: Open an issue if Polymarket drifted
         if: failure()
         env:
@@ -29,6 +33,6 @@ jobs:
           existing=$(gh issue list --label canary --state open --json number --jq length)
           if [ "$existing" = "0" ]; then
             gh issue create --label canary \
-              --title "Canary: Polymarket surface drifted ($(date -u +%F))" \
-              --body "The weekly live canary failed: an endpoint shape or the installed py-clob-client-v2 surface no longer matches what pmq was verified against. See the failed run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              --title "Canary failed: endpoint drift or vulnerable dependency ($(date -u +%F))" \
+              --body "The weekly canary failed: an endpoint shape or the installed py-clob-client-v2 surface no longer matches what pmq was verified against, the egress allowlist saw a foreign host, or pip-audit found a vulnerable dependency. See the failed run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           fi

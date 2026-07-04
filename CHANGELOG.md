@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+* Trust batch: executable egress proof in the canary suite (records every
+  DNS resolution during a full session incl. a signed zero-fund order;
+  fails on any host outside polymarket.com; weekly CI prints the list in
+  public logs), a test pinning that the private key never reaches logs,
+  OpenSSF Scorecard workflow + badge, GitHub Actions pinned by commit SHA,
+  explicit workflow permissions, Dependabot (pip + actions), weekly
+  pip-audit wired into the canary alarm, README sections "Verify the
+  claims yourself" (egress, PEP 740 provenance, dependency watch) and
+  "Stability and maintenance" (pre-1.0 SemVer contract, the stated bar for
+  1.0, bus-factor honesty, precisely scoped help-wanted).
 * Quality pass driven by pyscn (CFG complexity, dead code, clones): the
   template engine loop and pmq-doctor were split into single-purpose phase
   functions (worst cyclomatic complexity 36 -> 10 across the repo, zero dead

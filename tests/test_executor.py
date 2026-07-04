@@ -309,3 +309,21 @@ def test_cancel_order_single():
     assert make(fc).cancel_order("0xdead") is True
     assert ("cancel_orders", ["0xdead"]) in fc.calls
     assert make(FakeClient()).cancel_order("0xdead") is False
+
+
+def test_private_key_never_appears_in_logs(monkeypatch, caplog):
+    import logging
+
+    import py_clob_client_v2.client as real
+
+    class SpyClob(FakeClient):
+        def __init__(self, host, chain_id=None, key=None, signature_type=None,
+                     funder=None, builder_config=None, use_server_time=True,
+                     retry_on_error=True):
+            super().__init__()
+
+    monkeypatch.setattr(real, "ClobClient", SpyClob)
+    secret = "0x" + "7" * 64
+    with caplog.at_level(logging.DEBUG):
+        PolymarketExecutor(key=secret, derive_creds=False)
+    assert secret not in caplog.text and "7" * 64 not in caplog.text

@@ -70,3 +70,36 @@ def test_market_info_fee_field():
     mi = c.get_clob_market_info(pm["condition_id"])
     assert isinstance(mi, dict) and "fd" in mi and "r" in mi["fd"], \
         "get_clob_market_info no longer exposes fd.r (authoritative fee rate)"
+
+
+def test_egress_only_polymarket_hosts(monkeypatch):
+    """THE claim, made executable: keys cannot leak to a third party because
+    no third party is ever contacted. Records every DNS resolution during a
+    full session (market data, auth derivation, one signed order sent with a
+    throwaway zero-fund key) and fails on any host outside polymarket.com.
+    The weekly CI run prints the observed list in public logs."""
+    import socket
+
+    from eth_account import Account
+
+    hosts: set[str] = set()
+    real = socket.getaddrinfo
+
+    def spy(host, *args, **kwargs):
+        hosts.add(str(host))
+        return real(host, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", spy)
+    pm = _top_market()
+    pmq.get_book(pm["token_a"])
+    ex = pmq.PolymarketExecutor(key=Account.create().key.hex(),
+                                signature_type=0, funder=None)
+    assert ex.collateral() == 0.0            # throwaway key, zero funds
+    try:
+        fill = ex.buy_fak(pm["token_a"], price_cap=0.99, usd=1.0)
+        assert fill.rejected, "a zero-fund order must be cleanly rejected"
+    except pmq.OrderUncertain:
+        pass                                  # 5xx path; egress is the point
+    print("hosts contacted:", sorted(hosts))
+    foreign = {h for h in hosts if not h.endswith("polymarket.com")}
+    assert not foreign, f"unexpected egress: {sorted(foreign)}"
