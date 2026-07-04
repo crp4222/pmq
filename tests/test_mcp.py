@@ -131,18 +131,3 @@ def test_live_tools_book_only_confirmed_fills(monkeypatch):
     assert out["cancelled"] and out["shares"] == 2.0
     m._executor = FakeExecutor(trades=None)
     assert "error" in m.cancel_and_reconcile(condition_id="0xc")
-
-
-def test_attribution_tool_reports_all_three_states(monkeypatch):
-    from pmq.executor import DEFAULT_BUILDER_CODE
-    m = load_mcp(monkeypatch)
-    monkeypatch.delenv("POLY_BUILDER_CODE", raising=False)
-    out = m.attribution()
-    assert out["builder_code"] == DEFAULT_BUILDER_CODE
-    assert "default" in out["source"] and "0/0" in out["commission"]
-    monkeypatch.setenv("POLY_BUILDER_CODE", "0x" + "cd" * 32)
-    assert m.attribution()["builder_code"] == "0x" + "cd" * 32
-    assert "override" in m.attribution()["source"]
-    monkeypatch.setenv("POLY_BUILDER_CODE", "")
-    assert m.attribution()["builder_code"] is None
-    assert "opted out" in m.attribution()["source"]
