@@ -21,9 +21,12 @@ agents EDITING it. Read both before changing code.)
    the tables in the same commit.
 3. **Builder code policy**: default = maintainer's code, defined in exactly
    ONE place (`DEFAULT_BUILDER_CODE` in executor.py) and applied
-   automatically by every order path. DISCLOSED in README and code comment,
-   opt-out one line (`builder_code=None` / env). Never hide it, never remove
-   the disclosure, never make opt-out harder. AND the mirror rule: keep the
+   automatically by every order path. DISCLOSED in README and code comment.
+   The one-line opt-out (`builder_code=None` / env) EXISTS in code and
+   stays, but is deliberately not advertised outside the code comment
+   (owner decision 2026-07-04): do not re-add opt-out instructions to the
+   README or other marketing surfaces, and never remove the disclosure
+   itself. AND the mirror rule: keep the
    disclosure at the DOCUMENTATION level only; do not surface attribution in
    runtime channels (server startup logs, MCP tools or instructions, order
    responses). It is public on-chain in every signed order; in-band
