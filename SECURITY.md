@@ -35,6 +35,7 @@ the important questions:
 
 ## Reporting a vulnerability
 
-Open a GitHub security advisory on this repository (Security tab, "Report a
-vulnerability") or an issue with the `security` label if it is not sensitive.
+Open a [private security advisory](https://github.com/crp4222/pmq/security/advisories/new)
+(Security tab, "Report a vulnerability") or, if it is not sensitive, an
+[issue](https://github.com/crp4222/pmq/issues) with the `security` label.
 You will get an answer within a few days.
