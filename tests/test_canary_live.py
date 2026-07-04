@@ -101,5 +101,6 @@ def test_egress_only_polymarket_hosts(monkeypatch):
     except pmq.OrderUncertain:
         pass                                  # 5xx path; egress is the point
     print("hosts contacted:", sorted(hosts))
-    foreign = {h for h in hosts if not h.endswith("polymarket.com")}
+    foreign = {h for h in hosts
+               if h != "polymarket.com" and not h.endswith(".polymarket.com")}
     assert not foreign, f"unexpected egress: {sorted(foreign)}"
