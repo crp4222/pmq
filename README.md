@@ -41,7 +41,9 @@ a real error in live trading:
   (maker) / 4 decimals (taker) whatever the tick size. The official client's
   rounding table allows 5-6 taker decimals on markets whose tick is finer
   than 0.01 (any book trading past 0.96 or under 0.04), so market orders
-  there are rejected wholesale (reported upstream). pmq clamps the signed
+  there are rejected wholesale (reported upstream:
+  [py-clob-client-v2#99](https://github.com/Polymarket/py-clob-client-v2/issues/99)).
+  pmq clamps the signed
   pair to the exchange caps before signing and refuses at startup any
   client build that would still sign a rejectable pair, so the trap cannot
   reach your orders. Measurements in
