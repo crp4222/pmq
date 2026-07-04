@@ -14,6 +14,12 @@
   was lost. Regression test pins maker 2dp / taker 4dp on both sides for
   ticks 0.01, 0.001 and 0.0001.
 
+* Security surface: CodeQL workflow (its first scan caught and we fixed a
+  host-boundary bypass in the egress allowlist), Scorecard alert triage
+  with written dismissal reasons, top-level permissions on the publish
+  workflow, direct private-advisory link in SECURITY.md, Dependabot
+  vulnerability alerts enabled. Listed in the official MCP registry as
+  io.github.crp4222/pmq (publish rides releases via OIDC).
 * Trust batch: executable egress proof in the canary suite (records every
   DNS resolution during a full session incl. a signed zero-fund order;
   fails on any host outside polymarket.com; weekly CI prints the list in

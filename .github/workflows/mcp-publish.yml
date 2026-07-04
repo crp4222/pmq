@@ -21,6 +21,14 @@ jobs:
             --pattern "mcp-publisher_*linux_amd64.tar.gz" --output mp.tgz
           tar -xzf mp.tgz
           ./mcp-publisher --version
+      - name: Wait for the version to exist on PyPI
+        run: |
+          V=$(python3 -c "import json; print(json.load(open('server.json'))['version'])")
+          for i in $(seq 1 20); do
+            curl -s "https://pypi.org/pypi/pmquant/$V/json" | grep -q '"version"' && exit 0
+            echo "PyPI does not serve $V yet ($i/20)"; sleep 30
+          done
+          echo "giving up: registry would reject an unpublished version"; exit 1
       - name: Publish server.json to the MCP registry
         run: |
           ./mcp-publisher login github-oidc
