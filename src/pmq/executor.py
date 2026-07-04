@@ -60,6 +60,30 @@ _UNSET: Any = object()
 _CENT = Decimal("0.01")
 
 
+def _patch_market_taker_precision() -> None:
+    """py-clob-client-v2 1.0.2 reuses its LIMIT-order rounding table for
+    MARKET orders. For ticks finer than 0.01 that table allows taker amounts
+    with 5-6 decimals, which the V2 exchange rejects outright ("invalid
+    amounts ... taker amount a max of 4 decimals"), so every FAK on such a
+    market fails. Until upstream fixes the table, clamp the market path to 4
+    decimals: round-down semantics keep the never-exceed-budget contract and
+    the dust given up is under 0.0001 share per order."""
+    from py_clob_client_v2.order_builder import builder as _builder
+    original = _builder.OrderBuilder.get_market_order_amounts
+    if getattr(original, "_pmq_taker4", False):
+        return
+
+    def clamped(self: Any, side: Any, amount: float, price: float,
+                round_config: Any) -> Any:
+        if round_config.amount > 4:
+            round_config = _builder.RoundConfig(
+                price=round_config.price, size=round_config.size, amount=4)
+        return original(self, side, amount, price, round_config)
+
+    clamped._pmq_taker4 = True  # type: ignore[attr-defined]
+    _builder.OrderBuilder.get_market_order_amounts = clamped
+
+
 def _floor_cents(x: float) -> float:
     """Round DOWN to the cent without the binary-float drift that makes
     ``int(16.90 * 100) / 100`` return ``16.89``. ``str(x)`` yields the shortest
@@ -142,6 +166,7 @@ class PolymarketExecutor:
             "OrderType": OrderType, "TradeParams": TradeParams,
         }
         self.PolyApiException: type[Exception] = PolyApiException
+        _patch_market_taker_precision()
 
         if builder_code is _UNSET:
             builder_code = os.environ.get("POLY_BUILDER_CODE", DEFAULT_BUILDER_CODE)

@@ -338,3 +338,27 @@ def test_nan_inf_negative_amounts_book_zero():
                                           "takingAmount": "5.0"}))
         f = ex.buy_fak("tok", 0.97, 5.0)
         assert not f and f.matched_usd == 0.0 and f.matched_shares == 0.0
+
+
+def test_market_taker_amounts_clamped_to_4dp_on_fine_ticks():
+    """1.0.2's rounding table allows 5-6dp market takers on ticks finer than
+    0.01; the V2 exchange caps market takers at 4dp and rejects the order.
+    Constructing an executor must clamp the market path (and stay idempotent)
+    so signed pairs are always exchange-acceptable."""
+    from py_clob_client_v2.order_builder.builder import (
+        ROUNDING_CONFIG,
+        OrderBuilder,
+    )
+    from py_clob_client_v2.order_builder.constants import BUY, SELL
+
+    make(FakeClient())
+    make(FakeClient())          # second init must not double-wrap
+    fn = OrderBuilder.get_market_order_amounts
+    assert getattr(fn, "_pmq_taker4", False)
+    b = object.__new__(OrderBuilder)
+    for tick in ("0.01", "0.001", "0.0001"):
+        _, mk, tk = fn(b, BUY, 9.98, 0.985, ROUNDING_CONFIG[tick])
+        assert int(mk) % 10**4 == 0, f"maker >2dp at tick {tick}"
+        assert int(tk) % 10**2 == 0, f"taker >4dp at tick {tick}"
+        _, mk_s, tk_s = fn(b, SELL, 10.13, 0.985, ROUNDING_CONFIG[tick])
+        assert int(mk_s) % 10**4 == 0 and int(tk_s) % 10**2 == 0

@@ -14,6 +14,12 @@ debug a CLOB balance of 0 while funds are on-chain (wrong signature_type,
 deposit wallets need 3), compute Polymarket taker fees, or read real-time
 books instead of the lagging trade tape.
 
+Operational proof (2026-07-04): the maintainer's own funds trade through
+this exact code daily; releases carry signed PEP 740 attestations (PyPI
+trusted publishing); a weekly public CI egress test records every DNS
+resolution during a full session and shows the only hosts ever contacted
+are clob.polymarket.com and gamma-api.polymarket.com.
+
 Not a strategy, not a bot, no hosted backend, no custody. FAK buys route
 through the market-order path (the CLOB treats them as market orders).
 Ships with the maintainer's zero-commission builder code by default;

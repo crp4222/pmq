@@ -1,6 +1,18 @@
 # Changelog
 
-## Unreleased
+## 0.4.3 (2026-07-04)
+
+* Fix: py-clob-client-v2 1.0.2 reuses its limit-order rounding table for
+  MARKET orders, so on markets whose tick size is finer than 0.01 it signs
+  taker amounts with 5-6 decimals; the V2 exchange rejects those with
+  "invalid amounts ... taker amount a max of 4 decimals" and every FAK on
+  such a market fails. The executor now clamps the market-order path to 4
+  decimals at client level (round-down: the never-exceed-budget contract is
+  intact, the dust given up is under 0.0001 share per order). Found in
+  production: a fine-tick market rejected 10 consecutive buys and the
+  fail-closed halt fired exactly as designed; nothing was booked, nothing
+  was lost. Regression test pins maker 2dp / taker 4dp on both sides for
+  ticks 0.01, 0.001 and 0.0001.
 
 * Trust batch: executable egress proof in the canary suite (records every
   DNS resolution during a full session incl. a signed zero-fund order;
