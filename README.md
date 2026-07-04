@@ -39,11 +39,13 @@ a real error in live trading:
   of 2 decimals, taker amount a max of 4 decimals`: the CLOB treats FAK/FOK
   buys as **market orders** and caps their signed amounts at 2 decimals
   (maker) / 4 decimals (taker) whatever the tick size. The official client's
-  rounding table allows 5-6 taker decimals on ticks finer than 0.01, so every
-  market order there is rejected; this cost us a production halt on
-  2026-07-04. pmq clamps the signed pair to the exchange caps (0.4.3) and
-  refuses at startup any client build that would still sign a rejectable
-  pair (0.4.5).
+  rounding table allows 5-6 taker decimals on markets whose tick is finer
+  than 0.01 (any book trading past 0.96 or under 0.04), so market orders
+  there are rejected wholesale (reported upstream). pmq clamps the signed
+  pair to the exchange caps before signing and refuses at startup any
+  client build that would still sign a rejectable pair, so the trap cannot
+  reach your orders. Measurements in
+  [docs/rounding-study.md](docs/rounding-study.md).
 * `no orders found to match with FAK order` (HTTP 400, yet with an `orderID`):
   a clean no-fill, not an error. pmq returns an empty `Fill` instead of crashing
   or, worse, retrying blindly.
