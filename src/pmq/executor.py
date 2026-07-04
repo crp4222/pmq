@@ -285,7 +285,8 @@ class PolymarketExecutor:
         """Fill-and-kill market SELL of ``shares`` at prices no worse than
         ``price_floor``. Same confirmation contract as :meth:`buy_fak`.
         The buy path has carried live volume; the sell path follows the same
-        documented semantics but flag it as less battle-tested."""
+        documented semantics; production-verified with a live round trip
+        (mirrored makingAmount/takingAmount cross-checked via get_trades)."""
         shares = _floor_cents(shares)
         if shares <= 0:
             return Fill(rejected=True, error="share amount rounds to zero")

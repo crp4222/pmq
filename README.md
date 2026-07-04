@@ -126,9 +126,10 @@ else:
         print(fill.matched_shares, "shares at", fill.price, "order", fill.order_id)
 ```
 
-`sell_fak` and `limit_gtc` follow the same contract. The buy path has carried
-live volume; treat the sell path as following the same documented semantics
-with less battle time.
+`sell_fak` and `limit_gtc` follow the same contract. Both FAK paths have
+carried real volume: a production round trip (buy 5.149 @ 0.94, sell back
+5.14 @ 0.94, cross-checked via `get_trades`) confirmed the mirrored
+`makingAmount`/`takingAmount` semantics on 2026-07-03.
 
 ## The signature_type table nobody gives you
 
