@@ -176,6 +176,7 @@ class PolymarketExecutor:
 
         if client is not None:
             self.client = client
+            self.funder: str | None = funder or os.environ.get("POLY_FUNDER")
         else:
             from py_clob_client_v2.client import ClobClient
             key = key or os.environ.get("POLY_PRIVATE_KEY")
@@ -191,6 +192,7 @@ class PolymarketExecutor:
                                      signature_type=signature_type, funder=funder,
                                      builder_config=builder_config,
                                      use_server_time=True, retry_on_error=True)
+            self.funder = funder
             if derive_creds:
                 self.client.set_api_creds(self.client.create_or_derive_api_key())
         self._verify_client_surface()
@@ -419,7 +421,13 @@ class PolymarketExecutor:
                       ) -> tuple[float, float, float] | None:
         """Exchange truth for one market: (shares, usd, fee_estimate) actually
         traded on our account, or None if the API is unreachable. FAILED
-        trades are excluded; maker fills carry zero fee."""
+        trades are excluded; maker fills carry zero fee.
+
+        MAKER-role records report the counterparty's AGGREGATE size at top
+        level (verified on a real settlement, 2026-07-04); our actual slice
+        lives in ``maker_orders``, matched by funder address. Set
+        POLY_FUNDER even for sig 0 accounts if you post resting orders,
+        otherwise all slices of bundled trades are attributed to you."""
         try:
             trades = self.client.get_trades(
                 self._t["TradeParams"](market=condition_id, asset_id=token_id))
@@ -432,14 +440,38 @@ class PolymarketExecutor:
                 continue
             if t.get("status") == "FAILED":
                 continue
+            if t.get("trader_side") == "MAKER":
+                mos = t.get("maker_orders")
+                if not isinstance(mos, list) or not mos:
+                    # minimal record without slices: top-level size is ours
+                    try:
+                        s, p = float(t.get("size") or 0), float(t.get("price") or 0)
+                    except (TypeError, ValueError):
+                        continue
+                    sh += s
+                    usd += p * s
+                    continue
+                me = (self.funder or "").lower()
+                for mo in mos:
+                    if not isinstance(mo, dict):
+                        continue
+                    if me and str(mo.get("maker_address", "")).lower() != me:
+                        continue
+                    try:
+                        s = float(mo.get("matched_amount") or 0)
+                        p = float(mo.get("price") or 0)
+                    except (TypeError, ValueError):
+                        continue
+                    sh += s
+                    usd += p * s
+                continue                       # maker fills pay zero fee
             try:
                 s, p = float(t.get("size") or 0), float(t.get("price") or 0)
             except (TypeError, ValueError):
                 continue
             sh += s
             usd += p * s
-            if t.get("trader_side") != "MAKER":
-                fees += fee(p, s, fee_rate)
+            fees += fee(p, s, fee_rate)
         return sh, usd, fees
 
     def reconcile(self, condition_id: str, token_id: str | None = None,

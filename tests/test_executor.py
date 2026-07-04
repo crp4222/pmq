@@ -376,3 +376,34 @@ def test_startup_refuses_client_signing_dirty_market_amounts(monkeypatch):
     monkeypatch.setattr(b.OrderBuilder, "get_market_order_amounts", dirty)
     with pytest.raises(IntrospectionMismatch):
         make(FakeClient())
+
+
+MAKER_RECORD = {
+    "side": "BUY", "size": "26.461537", "price": "0.64",
+    "trader_side": "MAKER", "status": "CONFIRMED",
+    "transaction_hash": "0x1b60f19a6f089624f27babb58bf82538c49f044ee83778783195e26a33c35d09",
+    "maker_orders": [
+        {"maker_address": "0x76cD962FC8C5f5E5a0CBE14C74339AA78268dA58",
+         "matched_amount": "5", "price": "0.39", "order_id": "0x35fb607f67ef"},
+        {"maker_address": "0x51DBDd2b190a49c1D6fA6df84c1F4A079bC1De76",
+         "matched_amount": "21.461537", "price": "0.3500000023297493",
+         "order_id": "0x868caa9688b9"}]}
+
+
+def test_trades_totals_maker_record_counts_only_our_slice(monkeypatch):
+    """Real settlement record 2026-07-04: the taker's aggregate size sits at
+    top level; our fill is the maker_orders slice matched by funder."""
+    monkeypatch.setenv("POLY_FUNDER", "0x76cD962FC8C5f5E5a0CBE14C74339AA78268dA58")
+    ex = make(FakeClient(trades=[MAKER_RECORD]))
+    sh, usd, fees = ex.trades_totals("0xc")
+    assert sh == 5.0 and abs(usd - 1.95) < 1e-9 and fees == 0.0
+
+
+def test_trades_totals_taker_records_unchanged(monkeypatch):
+    monkeypatch.delenv("POLY_FUNDER", raising=False)
+    taker = {"side": "BUY", "size": "5.2", "price": "0.95",
+             "trader_side": "TAKER", "status": "CONFIRMED"}
+    ex = make(FakeClient(trades=[taker, {"side": "BUY", "size": "9",
+                                         "price": "0.9", "status": "FAILED"}]))
+    sh, usd, fees = ex.trades_totals("0xc")
+    assert sh == 5.2 and abs(usd - 4.94) < 1e-9 and fees > 0
