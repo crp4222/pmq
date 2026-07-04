@@ -10,10 +10,15 @@
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/crp4222/pmq/badge)](https://scorecard.dev/viewer/?uri=github.com/crp4222/pmq)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-Fail-closed execution and market data for **Polymarket CLOB V2**, in Python.
-Local signing (your keys never leave your process), exchange-confirmed fills
-only, fee-correct math, and deposit-wallet (`POLY_1271`) support that actually
-works in production.
+Fail-closed execution and market data for **Polymarket CLOB V2**, in Python,
+built agent-first. Local signing (your keys never leave your process),
+exchange-confirmed fills only, fee-correct math, deposit-wallet
+(`POLY_1271`) support that actually works in production, and a bundled
+**MCP server**: plug any LLM or agent framework that speaks MCP (Claude,
+ChatGPT, LangChain, your own loop) on top and it can read every market and,
+if and only if the operator enables it, trade under hard rails: tools that
+do not exist until you create them, a cap per order, a daily buy budget.
+The model cannot widen any of this from inside a session.
 
 ```bash
 pip install pmquant        # distribution name pmquant, import name pmq
@@ -189,16 +194,43 @@ attribution inside signed orders (`pmq.executor.DEFAULT_BUILDER_CODE`). Its
 commission is set to **0/0: it never adds any fee to your orders**. Attribution
 feeds Polymarket's builder program and funds this project at zero cost to you.
 
-## MCP server (agents)
+## Agents: the MCP server
 
 `pip install "pmquant[mcp]"` then run `pmq-mcp` (stdio). Listed in the
 [official MCP registry](https://registry.modelcontextprotocol.io) as
-`io.github.crp4222/pmq`. Read tools (market,
-book, taker_fee, account_collateral, account_trades) always exist. Trading
-tools (`fak_buy`, `fak_sell`, `cancel_and_reconcile`) are **only registered
-when the operator sets `PMQ_MCP_LIVE=1`** in the server environment: an
-agent cannot talk its way past a tool that was never created. Every order is
-capped per call by `PMQ_MCP_MAX_USD` (default 10).
+`io.github.crp4222/pmq`. Any MCP-speaking client works: Claude Desktop or
+Code, ChatGPT, LangChain, a bare SDK loop; the server neither knows nor
+cares which model drives it.
+
+**What an agent can do, exactly:**
+
+| Tool | Needs | What it does |
+|---|---|---|
+| `find_markets` | nothing | discover active markets, any category, full-text search |
+| `event` | nothing | all binary markets of a multi-outcome event (elections, tournaments) |
+| `market` | nothing | slug to condition id, outcome names, token ids, close time, winner |
+| `book` | nothing | real-time bid/ask with sizes, depth in a price range, exchange minimums |
+| `taker_fee` | nothing | official fee formula per category, cost per share including fee |
+| `account_collateral` | keys | CLOB-visible balance, with sig_type diagnostic |
+| `account_trades` | keys | exchange-truth totals of our trades on one market |
+| `fak_buy` | keys + `PMQ_MCP_LIVE=1` | open a position: fill-and-kill buy, nothing ever rests |
+| `fak_sell` | keys + `PMQ_MCP_LIVE=1` | close a position: fill-and-kill sell, same contract |
+| `cancel_and_reconcile` | keys + `PMQ_MCP_LIVE=1` | cancel everything resting on a market, return exchange truth |
+
+**The rails, all operator-set (server environment, invisible to and
+untouchable by the model):**
+
+| Variable | Effect | Default |
+|---|---|---|
+| `PMQ_MCP_LIVE` | unset: the three trading tools are never REGISTERED; an agent cannot call a tool that does not exist | read-only |
+| `PMQ_MCP_MAX_USD` | hard cap per single order | 10 |
+| `PMQ_MCP_DAILY_USD` | cumulative BUY budget per UTC day; confirmed spend counts, an unknown outcome conservatively consumes the full requested amount until reconciled | off |
+| `POLY_*` keys | omit them entirely for a data-only server | absent |
+
+Structural rails on top: only FAK orders exist (nothing rests unattended on
+the book), every uncertain outcome routes the agent to reconciliation
+before it may trade that market again, and fills are booked only from
+exchange confirmations, never from optimism.
 
 ```json
 {

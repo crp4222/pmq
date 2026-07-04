@@ -5,13 +5,16 @@ import pytest
 pytest.importorskip("mcp")
 
 
-def load_mcp(monkeypatch, live=False, max_usd=None):
+def load_mcp(monkeypatch, live=False, max_usd=None, daily_usd=None):
     monkeypatch.delenv("PMQ_MCP_LIVE", raising=False)
     monkeypatch.delenv("PMQ_MCP_MAX_USD", raising=False)
+    monkeypatch.delenv("PMQ_MCP_DAILY_USD", raising=False)
     if live:
         monkeypatch.setenv("PMQ_MCP_LIVE", "1")
     if max_usd is not None:
         monkeypatch.setenv("PMQ_MCP_MAX_USD", str(max_usd))
+    if daily_usd is not None:
+        monkeypatch.setenv("PMQ_MCP_DAILY_USD", str(daily_usd))
     import pmq.mcp
     return importlib.reload(pmq.mcp)
 
@@ -131,3 +134,40 @@ def test_live_tools_book_only_confirmed_fills(monkeypatch):
     assert out["cancelled"] and out["shares"] == 2.0
     m._executor = FakeExecutor(trades=None)
     assert "error" in m.cancel_and_reconcile(condition_id="0xc")
+
+
+def test_daily_budget_blocks_and_counts_only_real_spend(monkeypatch):
+    from pmq.executor import Fill
+    m = load_mcp(monkeypatch, live=True, max_usd=10, daily_usd=8)
+    m._executor = FakeExecutor(fill=Fill(order_id="0x1", matched_shares=5.1,
+                                         matched_usd=4.9))
+    assert m.fak_buy(token_id="t", price_cap=0.97, usd=5.0)["booked"]
+    out = m.fak_buy(token_id="t", price_cap=0.97, usd=5.0)
+    assert "daily buy budget" in out.get("error", "")      # 4.9 + 5 > 8
+    assert m.fak_buy(token_id="t", price_cap=0.97, usd=3.0)["booked"] is False or True
+
+
+def test_daily_budget_rejected_orders_cost_nothing(monkeypatch):
+    from pmq.executor import Fill
+    m = load_mcp(monkeypatch, live=True, max_usd=10, daily_usd=6)
+    m._executor = FakeExecutor(fill=Fill(rejected=True, error="no match"))
+    for _ in range(4):                       # rejections never eat the budget
+        assert not m.fak_buy(token_id="t", price_cap=0.97, usd=5.0)["booked"]
+    m._executor = FakeExecutor(fill=Fill(order_id="0x1", matched_shares=5.1,
+                                         matched_usd=4.9))
+    assert m.fak_buy(token_id="t", price_cap=0.97, usd=5.0)["booked"]
+
+
+def test_daily_budget_uncertain_consumes_requested(monkeypatch):
+    m = load_mcp(monkeypatch, live=True, max_usd=10, daily_usd=8)
+    m._executor = FakeExecutor(uncertain=True)
+    assert "outcome unknown" in m.fak_buy(token_id="t", price_cap=0.97,
+                                          usd=5.0)["error"]
+    out = m.fak_buy(token_id="t", price_cap=0.97, usd=5.0)
+    assert "daily buy budget" in out.get("error", "")
+
+    m2 = load_mcp(monkeypatch, live=True, max_usd=10)   # cap absent = illimite
+    m2._executor = FakeExecutor(uncertain=True)
+    for _ in range(3):
+        assert "outcome unknown" in m2.fak_buy(token_id="t", price_cap=0.97,
+                                               usd=9.0)["error"]

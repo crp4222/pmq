@@ -7,13 +7,13 @@
     "url": "https://github.com/crp4222/pmq",
     "source": "github"
   },
-  "version": "0.4.6",
+  "version": "0.4.7",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "pmquant",
-      "version": "0.4.6",
+      "version": "0.4.7",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
@@ -28,6 +28,12 @@
         {
           "name": "PMQ_MCP_MAX_USD",
           "description": "Per-order hard cap in USD enforced before any live buy (default 10). Only relevant when PMQ_MCP_LIVE=1.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "PMQ_MCP_DAILY_USD",
+          "description": "Cumulative BUY budget per UTC day across the whole session (off when unset). Confirmed spend counts; unknown outcomes conservatively consume the requested amount until reconciled.",
           "isRequired": false,
           "isSecret": false
         },

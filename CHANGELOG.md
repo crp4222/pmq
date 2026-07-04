@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.7 (2026-07-04)
+
+* MCP: `PMQ_MCP_DAILY_USD`, a cumulative BUY budget per UTC day on top of
+  the per-order cap. Confirmed spend counts; a clean rejection costs
+  nothing; an unknown outcome conservatively consumes the requested amount
+  until reconciled. Per process (a restart resets it): a runaway-session
+  limiter, not accounting.
+* Docs: the project now leads agent-first. README opens on the MCP server,
+  and the agents section documents the exact tool surface (a table per
+  tool with what it needs) and every operator-set rail (LIVE gate,
+  per-order cap, daily budget, keyless data-only mode), plus the
+  structural rails (FAK only, forced reconciliation, confirmed-fill
+  booking).
+
 ## 0.4.6 (2026-07-04)
 
 * Fix: `trades_totals` overcounted MAKER-role fills. V2 bundles a taker

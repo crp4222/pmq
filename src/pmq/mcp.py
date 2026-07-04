@@ -14,6 +14,7 @@ Run with ``pmq-mcp`` (stdio transport). Design rules:
 from __future__ import annotations
 
 import os
+import time
 import urllib.parse
 from typing import TYPE_CHECKING, Any
 
@@ -30,6 +31,26 @@ except ImportError as e:  # pragma: no cover
 
 LIVE_ENABLED = os.environ.get("PMQ_MCP_LIVE") == "1"
 MAX_USD = float(os.environ.get("PMQ_MCP_MAX_USD", "10"))
+MAX_DAILY_USD = float(os.environ.get("PMQ_MCP_DAILY_USD", "0"))
+_budget_day = [""]
+_budget_spent = [0.0]
+
+
+def _budget_left() -> float | None:
+    """Remaining daily BUY budget, None when disabled (PMQ_MCP_DAILY_USD
+    unset or <= 0). Resets at the UTC day change. Per process: a server
+    restart resets it; this is a runaway-session limiter, not accounting."""
+    if MAX_DAILY_USD <= 0:
+        return None
+    day = time.strftime("%Y-%m-%d", time.gmtime())
+    if _budget_day[0] != day:
+        _budget_day[0], _budget_spent[0] = day, 0.0
+    return MAX_DAILY_USD - _budget_spent[0]
+
+
+def _budget_consume(usd: float) -> None:
+    if MAX_DAILY_USD > 0:
+        _budget_spent[0] += usd
 
 mcp = FastMCP(
     "pmq",
@@ -37,7 +58,9 @@ mcp = FastMCP(
         "Polymarket CLOB V2 data and fail-closed execution. Books are real "
         "time; the trade tape lags 1 to 3 minutes, never trade off it. "
         + ("Trading tools are ENABLED; every order is capped at "
-           f"{MAX_USD:.2f} USD per call." if LIVE_ENABLED else
+           f"{MAX_USD:.2f} USD per call"
+           + (f" and buys at {MAX_DAILY_USD:.2f} USD per UTC day."
+              if MAX_DAILY_USD > 0 else ".") if LIVE_ENABLED else
            "Trading tools are DISABLED (operator did not set PMQ_MCP_LIVE=1); "
            "this server is read-only.")),
 )
@@ -168,14 +191,26 @@ if LIVE_ENABLED:
         """Place a fill-and-kill market BUY: spend up to `usd` at prices no
         worse than `price_cap`. Nothing rests on the book. Book ONLY what
         `matched_shares`/`matched_usd` report; `booked: false` means nothing
-        happened. Hard-capped per call by the operator's PMQ_MCP_MAX_USD."""
+        happened. Hard-capped per call by the operator's PMQ_MCP_MAX_USD and
+        per UTC day by PMQ_MCP_DAILY_USD when set (confirmed spend counts;
+        an unknown outcome conservatively consumes the full requested
+        amount until reconciled)."""
         if usd > MAX_USD:
             return {"error": f"refused: {usd} exceeds the {MAX_USD} USD per-order cap"}
+        left = _budget_left()
+        if left is not None and usd > left:
+            return {"error": f"refused: daily buy budget "
+                             f"({MAX_DAILY_USD:.2f} USD) leaves only "
+                             f"{max(left, 0.0):.2f} USD today"}
         try:
-            return _fill_dict(_ex().buy_fak(token_id, price_cap, usd))
+            fill = _ex().buy_fak(token_id, price_cap, usd)
         except OrderUncertain as e:
+            _budget_consume(usd)
             return {"error": f"outcome unknown ({e}); call cancel_and_reconcile "
                              "on this market before any new order"}
+        if fill:
+            _budget_consume(fill.matched_usd)
+        return _fill_dict(fill)
 
     @mcp.tool()
     def fak_sell(token_id: str, price_floor: float, shares: float) -> dict[str, Any]:

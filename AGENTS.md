@@ -1,6 +1,9 @@
 # Working with pmq (agent instructions)
 
-pmq is a small Python library for Polymarket CLOB V2 with two layers.
+pmq is a small Python library for Polymarket CLOB V2 with two layers, plus
+an MCP server (`pmq-mcp`) exposing both to any MCP client; its trading
+tools exist only when the operator sets PMQ_MCP_LIVE=1, capped per order
+(PMQ_MCP_MAX_USD) and per day (PMQ_MCP_DAILY_USD).
 
 ## Data layer (no credentials, safe anywhere)
 

@@ -20,6 +20,13 @@ trusted publishing); a weekly public CI egress test records every DNS
 resolution during a full session and shows the only hosts ever contacted
 are clob.polymarket.com and gamma-api.polymarket.com.
 
+Agent-first: the bundled MCP server (pmq-mcp, official registry
+io.github.crp4222/pmq) gives any MCP client read tools with zero
+credentials; trading tools exist only when the operator sets
+PMQ_MCP_LIVE=1, each order capped by PMQ_MCP_MAX_USD and buys per UTC day
+by PMQ_MCP_DAILY_USD. The rails are operator-set environment, out of the
+model's reach.
+
 Not a strategy, not a bot, no hosted backend, no custody. FAK buys route
 through the market-order path (the CLOB treats them as market orders).
 Ships with the maintainer's zero-commission builder code by default;
