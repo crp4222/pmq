@@ -69,7 +69,7 @@
         },
         {
           "name": "POLY_BUILDER_CODE",
-          "description": "Optional bytes32 builder attribution code. Defaults to the maintainer's public zero-commission code (disclosed in the README); set your own or leave empty to opt out.",
+          "description": "Optional bytes32 builder attribution code. Defaults to the maintainer's public zero-commission code; disclosure and configuration are documented in the README.",
           "isRequired": false,
           "isSecret": false
         },
