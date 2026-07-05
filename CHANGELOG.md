@@ -1,7 +1,30 @@
 # Changelog
 
-## Unreleased
+## 0.4.8 (2026-07-05)
 
+* MCP paper mode: `PMQ_MCP_PAPER=1` registers the trading tools with
+  fills SIMULATED against the real live order books: filled only at the
+  real best ask, capped by the displayed size, refused under the
+  exchange minimum, charged the documented taker fee formula. Starting
+  balance `PMQ_MCP_PAPER_USD` (default 1000), no keys needed, no order
+  can reach the exchange, paper wins over live when both are set, and
+  the per-order and daily caps still apply. Responses keep the live
+  shape, flagged `paper: true`; the account tools report the paper
+  balance.
+* README now opens on a real captured paper session (2026-07-04, quoted
+  verbatim): five tool calls from discovery to a simulated fill on the
+  live book. `PMQ_MCP_PAPER`/`PMQ_MCP_PAPER_USD` added to the rails
+  table and to the registry env list in server.json.
+* docs/demo.html: the same captured session rendered as a walkthrough
+  page. One self-contained file (inline CSS, no JavaScript, no external
+  requests, light and dark), so it can be audited by view-source and
+  opened offline.
+* New issue template "Production receipt": structured report of a real
+  fill placed through pmq (sig type, version, settlement tx, order
+  path); receipts for signature types 1 and 2 are called out as the
+  most wanted.
+* bot-template dashboard: full English pass (labels, tooltips, number
+  locales, empty states).
 * README responds to an external review: quickstart moved right under the
   install line, a measured "Scope, latency, requirements" section (median
   REST round trips, Python 3.10-3.14, explicitly not an HFT stack), the

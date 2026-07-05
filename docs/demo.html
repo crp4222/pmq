@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>pmq: a captured paper session</title>
+<style>
+  :root {
+    --page: #f9f9f7;
+    --card: #fcfcfb;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --line: #e1e0d9;
+    --ring: rgba(11, 11, 11, 0.10);
+    --accent: #1c5cab;
+    --accent-soft: rgba(42, 120, 214, 0.10);
+    --good: #006300;
+    --good-soft: rgba(12, 163, 12, 0.10);
+    --bid: #008300;
+    --ask: #c73433;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #0d0d0d;
+      --card: #1a1a19;
+      --ink: #ffffff;
+      --ink-2: #c3c2b7;
+      --muted: #898781;
+      --line: #2c2c2a;
+      --ring: rgba(255, 255, 255, 0.10);
+      --accent: #6da7ec;
+      --accent-soft: rgba(57, 135, 229, 0.16);
+      --good: #0ca30c;
+      --good-soft: rgba(12, 163, 12, 0.16);
+      --bid: #1baf7a;
+      --ask: #e66767;
+    }
+  }
+  :root[data-theme="light"] {
+    --page: #f9f9f7; --card: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e;
+    --muted: #898781; --line: #e1e0d9; --ring: rgba(11, 11, 11, 0.10);
+    --accent: #1c5cab; --accent-soft: rgba(42, 120, 214, 0.10);
+    --good: #006300; --good-soft: rgba(12, 163, 12, 0.10);
+    --bid: #008300; --ask: #c73433;
+  }
+  :root[data-theme="dark"] {
+    --page: #0d0d0d; --card: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7;
+    --muted: #898781; --line: #2c2c2a; --ring: rgba(255, 255, 255, 0.10);
+    --accent: #6da7ec; --accent-soft: rgba(57, 135, 229, 0.16);
+    --good: #0ca30c; --good-soft: rgba(12, 163, 12, 0.16);
+    --bid: #1baf7a; --ask: #e66767;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { background: var(--page); }
+  body {
+    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--ink);
+    background: var(--page);
+    padding: 40px 20px 64px;
+  }
+  .wrap { max-width: 780px; margin: 0 auto; }
+  code, .mono {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.87em;
+  }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+  /* header */
+  .brand { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .brand .name {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 17px; font-weight: 700; letter-spacing: 0.02em;
+  }
+  .brand .dist { color: var(--muted); font-size: 13px; }
+  h1 {
+    font-size: clamp(25px, 4.5vw, 33px);
+    line-height: 1.2; letter-spacing: -0.015em;
+    text-wrap: balance; margin: 14px 0 10px;
+  }
+  .lede { color: var(--ink-2); max-width: 62ch; }
+  .pills { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; }
+  .pill {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 4px 10px; border-radius: 999px;
+    border: 1px solid var(--ring); color: var(--ink-2); background: var(--card);
+  }
+  .pill.paper { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+
+  /* config strip */
+  .setup { margin: 26px 0 34px; }
+  .setup .cap {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 8px;
+  }
+  pre {
+    background: var(--card); border: 1px solid var(--ring); border-radius: 8px;
+    padding: 12px 14px; overflow-x: auto; line-height: 1.55;
+  }
+  pre code { font-size: 12.5px; }
+
+  /* timeline */
+  .steps { list-style: none; counter-reset: step; }
+  .steps > li { position: relative; padding: 0 0 22px 44px; counter-increment: step; }
+  .steps > li::before {
+    content: counter(step);
+    position: absolute; left: 0; top: 2px;
+    width: 26px; height: 26px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px; font-weight: 600; color: var(--ink-2);
+    background: var(--card); border: 1px solid var(--line);
+  }
+  .steps > li::after {
+    content: ""; position: absolute; left: 13px; top: 34px; bottom: 4px;
+    width: 1px; background: var(--line);
+  }
+  .steps > li:last-child::after { display: none; }
+  .steps > li:last-child { padding-bottom: 0; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--ring); border-radius: 10px;
+    padding: 14px 16px 15px;
+  }
+  .call {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px; overflow-wrap: anywhere;
+  }
+  .call .t { color: var(--accent); font-weight: 700; }
+  .call .p { color: var(--muted); }
+  .result { border-top: 1px solid var(--line); margin-top: 11px; padding-top: 11px; }
+  .gloss { color: var(--ink-2); font-size: 13.5px; margin-top: 10px; max-width: 64ch; }
+
+  /* readout grids */
+  .kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px 18px; }
+  .kv div { min-width: 0; }
+  .kv dt {
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 1px;
+  }
+  .kv dd {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13.5px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
+  }
+
+  /* market rows (step 1) */
+  .hits { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .hits td { padding: 6px 14px 6px 0; border-top: 1px solid var(--line); vertical-align: top; }
+  .hits tr:first-child td { border-top: none; padding-top: 0; }
+  .hits .slug { color: var(--ink-2); overflow-wrap: anywhere; }
+  .hits .vol {
+    text-align: right; padding-right: 0; white-space: nowrap; color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .chip {
+    display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em;
+    text-transform: uppercase; padding: 1px 7px; border-radius: 999px; vertical-align: 1px;
+  }
+  .chip.pick { background: var(--accent-soft); color: var(--accent); }
+  .chip.ok { background: var(--good-soft); color: var(--good); }
+  .chip.paper { background: var(--accent-soft); color: var(--accent); }
+  .more { color: var(--muted); font-size: 13px; padding-top: 7px; border-top: 1px solid var(--line); margin-top: 2px; }
+
+  /* book tiles (step 3) */
+  .quote { display: flex; align-items: stretch; gap: 14px; flex-wrap: wrap; }
+  .side { flex: 1 1 150px; border-left: 4px solid var(--line); border-radius: 2px; padding: 2px 0 2px 12px; }
+  .side.b { border-left-color: var(--bid); }
+  .side.a { border-left-color: var(--ask); }
+  .side .lab {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted);
+  }
+  .side .px {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 26px; font-weight: 600; line-height: 1.25; letter-spacing: -0.01em;
+  }
+  .side .sz { font-size: 12.5px; color: var(--ink-2); }
+  .spread { align-self: center; text-align: center; color: var(--muted); font-size: 12px; flex: 0 0 auto; }
+  .spread .n {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color: var(--ink-2); font-size: 13px;
+  }
+  .meta { color: var(--ink-2); font-size: 12.5px; margin-top: 12px; }
+  .meta code { color: var(--ink); }
+
+  /* receipt (step 4) */
+  .receipt-head { display: flex; gap: 8px; align-items: center; margin-bottom: 11px; }
+  .cash {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 26px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.25;
+  }
+  .cash .u { font-size: 13px; font-weight: 400; color: var(--muted); letter-spacing: 0; }
+
+  /* closing sections */
+  h2 { font-size: 16px; letter-spacing: -0.005em; margin: 40px 0 10px; }
+  .rails { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .rails td { padding: 7px 16px 7px 0; border-top: 1px solid var(--line); vertical-align: top; }
+  .rails td:first-child { white-space: nowrap; }
+  .rails td:last-child { color: var(--ink-2); padding-right: 0; }
+  .note { color: var(--ink-2); font-size: 13.5px; max-width: 68ch; }
+  .foot {
+    margin-top: 40px; padding-top: 14px; border-top: 1px solid var(--line);
+    color: var(--muted); font-size: 12.5px;
+    display: flex; flex-wrap: wrap; gap: 6px 18px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <p class="brand"><span class="name">pmq</span><span class="dist">pip install pmquant, import pmq</span></p>
+    <h1>What an agent sees through pmq</h1>
+    <p class="lede">A real MCP session against live Polymarket order books, captured
+    2026-07-04 and replayed here verbatim: five tool calls from market discovery to a
+    simulated fill. Paper money, real books, no keys.</p>
+    <div class="pills">
+      <span class="pill paper">Paper session</span>
+      <span class="pill">Real live order books</span>
+      <span class="pill">No keys</span>
+      <span class="pill">This page: HTML and CSS only</span>
+    </div>
+  </header>
+
+  <div class="setup">
+    <p class="cap">The whole setup, any MCP client</p>
+<pre><code>{ "mcpServers": { "pmq": { "command": "pmq-mcp", "env": { "PMQ_MCP_PAPER": "1" } } } }</code></pre>
+  </div>
+
+  <ol class="steps">
+
+    <li>
+      <div class="card">
+        <p class="call"><span class="t">find_markets</span><span class="p">(query=</span>"fed decision july"<span class="p">)</span></p>
+        <div class="result">
+          <table class="hits">
+            <tbody>
+              <tr>
+                <td>How many dissent at the July Fed meeting?<br>
+                    <span class="slug mono">will-no-one-dissent-the-july-fed-decision-20260616001928666</span>
+                    <span class="chip pick">agent picks this</span></td>
+                <td class="vol">$164.99</td>
+              </tr>
+              <tr>
+                <td>Fed Decision in July?<br>
+                    <span class="slug mono">will-the-fed-decrease-interest-rates-by-50-bps-after-the-july-2026-meeting</span></td>
+                <td class="vol">$310,450</td>
+              </tr>
+              <tr>
+                <td>Fed Decision in July?<br>
+                    <span class="slug mono">will-the-fed-decrease-interest-rates-by-25-bps-after-the-july-2026-meeting</span></td>
+                <td class="vol">$310,450</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="more">plus 9 more of the 12 markets returned; right column: 24h event volume</p>
+        </div>
+      </div>
+      <p class="gloss">Full-text market discovery across every Polymarket category.
+      Works with zero credentials.</p>
+    </li>
+
+    <li>
+      <div class="card">
+        <p class="call"><span class="t">market</span><span class="p">(slug=</span>"will-no-one-dissent-the-july-fed-decision-20260616001928666"<span class="p">)</span></p>
+        <div class="result">
+          <dl class="kv">
+            <div><dt>condition_id</dt><dd>0x50ba1767&#8230;4ba17967</dd></div>
+            <div><dt>token: Yes</dt><dd>30048105&#8230;83432002</dd></div>
+            <div><dt>token: No</dt><dd>24681329&#8230;07939148</dd></div>
+            <div><dt>closes</dt><dd>2026-07-29 15:59 UTC</dd></div>
+            <div><dt>settled winner</dt><dd>none yet</dd></div>
+          </dl>
+        </div>
+      </div>
+      <p class="gloss">Slug resolved to the condition id and one token id per outcome.
+      Those token ids drive the book and the trading tools. Long ids are shortened
+      here for display, nothing else on this page is.</p>
+    </li>
+
+    <li>
+      <div class="card">
+        <p class="call"><span class="t">book</span><span class="p">(token_id=</span>&lt;Yes&gt;<span class="p">)</span></p>
+        <div class="result">
+          <div class="quote">
+            <div class="side b">
+              <p class="lab">Best bid</p>
+              <p class="px">0.54</p>
+              <p class="sz">592.75 shares showing</p>
+            </div>
+            <div class="spread"><span class="n">0.02</span><br>spread</div>
+            <div class="side a">
+              <p class="lab">Best ask</p>
+              <p class="px">0.56</p>
+              <p class="sz">21 shares showing</p>
+            </div>
+          </div>
+          <p class="meta">min order <code>5 shares</code> &#183; tick <code>0.01</code> &#183;
+          last trade <code>0.57</code> &#183; asks resting across 0 to 1.00:
+          <code>$50,243.75</code> &#183; negative-risk event</p>
+        </div>
+      </div>
+      <p class="gloss">Served by the matching engine in real time, still no keys. The
+      exchange minimums and tick come from the venue, not from constants in the library.</p>
+    </li>
+
+    <li>
+      <div class="card">
+        <p class="call"><span class="t">fak_buy</span><span class="p">(token_id=</span>&lt;Yes&gt;<span class="p">, price_cap=</span>0.58<span class="p">, usd=</span>10<span class="p">)</span></p>
+        <div class="result">
+          <div class="receipt-head">
+            <span class="chip ok">booked</span>
+            <span class="chip paper">paper</span>
+          </div>
+          <dl class="kv">
+            <div><dt>matched</dt><dd>17.8571 shares</dd></div>
+            <div><dt>price</dt><dd>0.56 (cap was 0.58)</dd></div>
+            <div><dt>cost</dt><dd>10.00 USD</dd></div>
+            <div><dt>taker fee</dt><dd>0.308 USD</dd></div>
+            <div><dt>cash left</dt><dd>989.69 USD</dd></div>
+          </dl>
+        </div>
+      </div>
+      <p class="gloss">The simulator fills at the real best ask, never at the wished
+      cap, caps the fill at the displayed size, refuses anything under the 5-share
+      exchange minimum, and charges the documented taker fee formula,
+      rate&#183;p&#183;(1-p)&#183;shares. No order was sent: with
+      <code>PMQ_MCP_PAPER=1</code> none can be.</p>
+    </li>
+
+    <li>
+      <div class="card">
+        <p class="call"><span class="t">account_collateral</span><span class="p">()</span></p>
+        <div class="result">
+          <p class="cash">989.69 <span class="u">paper USD, started at 1,000.00</span></p>
+        </div>
+      </div>
+      <p class="gloss">One buy and its fee, nothing else. In live mode this tool
+      reports the collateral the exchange actually sees, with a signature-type
+      diagnostic when it disagrees with the chain.</p>
+    </li>
+
+  </ol>
+
+  <h2>What changes when real money is involved</h2>
+  <p class="note">Everything above ran keyless. Live trading must be switched on by
+  the operator, in the server environment, out of the model's reach:</p>
+  <table class="rails">
+    <tbody>
+      <tr><td><code>PMQ_MCP_LIVE</code> unset</td>
+          <td>the trading tools are never registered; an agent cannot call a tool that does not exist</td></tr>
+      <tr><td><code>PMQ_MCP_PAPER=1</code></td>
+          <td>this page's mode: simulated fills on the real books, keyless; wins over live if both are set</td></tr>
+      <tr><td><code>PMQ_MCP_MAX_USD</code></td>
+          <td>hard cap per single order, default 10, enforced in live and paper alike</td></tr>
+      <tr><td><code>PMQ_MCP_DAILY_USD</code></td>
+          <td>cumulative buy budget per UTC day; unknown outcomes conservatively consume it until reconciled</td></tr>
+    </tbody>
+  </table>
+  <p class="note" style="margin-top:10px">Structural rails on top: only
+  fill-and-kill orders exist, so nothing ever rests unattended on the book; a fill
+  is booked only from an exchange confirmation, never from optimism; any uncertain
+  outcome routes the agent to reconciliation before it may trade that market again.</p>
+
+  <h2>Run it yourself</h2>
+<pre><code>pip install "pmquant[mcp]"</code></pre>
+  <p class="note">Then point your MCP client (Claude Desktop or Code, ChatGPT,
+  LangChain, a bare SDK loop) at <code>pmq-mcp</code> with
+  <code>PMQ_MCP_PAPER=1</code>, as in the snippet at the top, and ask the agent to
+  find a market and trade it. Books move, so your numbers will differ from this
+  captured session.</p>
+
+  <p class="note" style="margin-top:18px">Every figure on this page comes from the
+  captured session of 2026-07-04, unedited. The page itself is one file of HTML and
+  CSS: no JavaScript, no network requests, view source to check.</p>
+
+  <div class="foot">
+    <a href="https://github.com/crp4222/pmq">github.com/crp4222/pmq</a>
+    <a href="https://pypi.org/project/pmquant/">pypi.org/project/pmquant</a>
+    <span>MCP registry: io.github.crp4222/pmq</span>
+    <span>MIT</span>
+  </div>
+
+</div>
+</body>
+</html>

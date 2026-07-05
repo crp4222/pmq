@@ -40,11 +40,14 @@ agents EDITING it. Read both before changing code.)
    claims with evidence (comparison table, on-chain receipts, measured
    studies). If you cannot prove it, do not write it.
 6. **MCP safety gates**: trading tools are REGISTERED only when the operator
-   sets `PMQ_MCP_LIVE=1`; per-order `PMQ_MCP_MAX_USD` and per-UTC-day
-   `PMQ_MCP_DAILY_USD` caps enforced BEFORE any client call (uncertain
-   outcomes consume budget conservatively). Read tools must keep working
-   with zero credentials. The README tool and rails tables are part of the
-   contract: keep them in sync with the registered tools.
+   sets `PMQ_MCP_LIVE=1` (live) or `PMQ_MCP_PAPER=1` (keyless fills
+   simulated against the real books; paper wins when both are set, and no
+   code path may ever let a paper session reach the exchange); per-order
+   `PMQ_MCP_MAX_USD` and per-UTC-day `PMQ_MCP_DAILY_USD` caps enforced
+   BEFORE any client call (uncertain outcomes consume budget
+   conservatively; both caps apply in paper too). Read tools must keep
+   working with zero credentials. The README tool and rails tables are part
+   of the contract: keep them in sync with the registered tools.
 
 ## Working rules
 

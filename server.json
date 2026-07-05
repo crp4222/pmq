@@ -7,13 +7,13 @@
     "url": "https://github.com/crp4222/pmq",
     "source": "github"
   },
-  "version": "0.4.7",
+  "version": "0.4.8",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "pmquant",
-      "version": "0.4.7",
+      "version": "0.4.8",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
@@ -21,13 +21,25 @@
       "environmentVariables": [
         {
           "name": "PMQ_MCP_LIVE",
-          "description": "Set to 1 to register the trading tools (fak_buy, fak_sell, cancel_and_reconcile). Unset or any other value keeps the server read-only.",
+          "description": "Set to 1 to register the LIVE trading tools (fak_buy, fak_sell, cancel_and_reconcile). Overridden by PMQ_MCP_PAPER=1; with neither set the server is read-only.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "PMQ_MCP_PAPER",
+          "description": "Set to 1 for paper trading: the trading tools are registered but fills are SIMULATED against the real live order books. No keys needed, no order ever reaches the exchange. Wins over PMQ_MCP_LIVE.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "PMQ_MCP_PAPER_USD",
+          "description": "Paper starting balance in USD (default 1000). Only relevant when PMQ_MCP_PAPER=1.",
           "isRequired": false,
           "isSecret": false
         },
         {
           "name": "PMQ_MCP_MAX_USD",
-          "description": "Per-order hard cap in USD enforced before any live buy (default 10). Only relevant when PMQ_MCP_LIVE=1.",
+          "description": "Per-order hard cap in USD enforced before any buy, live and paper alike (default 10).",
           "isRequired": false,
           "isSecret": false
         },

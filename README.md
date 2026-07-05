@@ -27,6 +27,43 @@ pip install pmquant        # Python >= 3.10; distribution pmquant, import pmq
 (PyPI's similarity check reserves the bare name; the module you import is
 `pmq`, same pattern as beautifulsoup4/bs4.)
 
+## Try it in 30 seconds, no keys
+
+Point any MCP client at `pmq-mcp` with one environment variable:
+
+```json
+{ "mcpServers": { "pmq": { "command": "pmq-mcp", "env": { "PMQ_MCP_PAPER": "1" } } } }
+```
+
+`PMQ_MCP_PAPER=1` registers the same trading tools as live, but fills are
+**simulated against the real live order books** (real best ask, real
+exchange minimums, the official taker fee formula) from a paper balance
+(default 1000, set `PMQ_MCP_PAPER_USD`). No keys anywhere, and no order
+can reach the exchange. A real session, captured 2026-07-04, quoted
+verbatim:
+
+```text
+> find_markets(query="fed decision july")
+    12 markets, among them "How many dissent at the July Fed meeting?"
+> market(slug="will-no-one-dissent-the-july-fed-decision-20260616001928666")
+    condition_id 0x50ba...7967, token ids for Yes and No, closes 2026-07-29
+> book(token_id=<Yes>)
+    bid 0.54 x 592.75 | ask 0.56 x 21 | min order 5 shares | tick 0.01
+> fak_buy(token_id=<Yes>, price_cap=0.58, usd=10)
+    paper fill: 17.8571 shares at 0.56 (the real ask, not the cap),
+    fee 0.308, cash left 989.69
+> account_collateral()
+    989.69 paper USD
+```
+
+Five calls: discover, resolve, read the live book, buy with simulated
+money at the real ask, check the balance. The same session rendered as a
+step-by-step page: [docs/demo.html](docs/demo.html) (one self-contained
+HTML file, no JavaScript, no external requests; download and open it).
+Trading real money additionally requires keys and an explicit
+`PMQ_MCP_LIVE=1`, under the rails in
+[the agents section](#agents-the-mcp-server).
+
 As of 2026-07-03 this is, to our knowledge, the **only maintained Python
 layer combining local CLOB V2 signing, an exchange-confirmed fill contract,
 and working deposit-wallet (POLY_1271) auth**. That claim is dated and
@@ -219,13 +256,22 @@ cares which model drives it.
 | `fak_sell` | keys + `PMQ_MCP_LIVE=1` | close a position: fill-and-kill sell, same contract |
 | `cancel_and_reconcile` | keys + `PMQ_MCP_LIVE=1` | cancel everything resting on a market, return exchange truth |
 
+With `PMQ_MCP_PAPER=1` (the [30-second demo](#try-it-in-30-seconds-no-keys)
+above) the same trading and account tools are registered **keyless**:
+fills are simulated at the real best ask, capped by the displayed size,
+refused under the exchange minimum, and the account tools report the
+paper balance. Responses keep the live shape, flagged `paper: true`, and
+no order ever reaches the exchange.
+
 **The rails, all operator-set (server environment, invisible to and
 untouchable by the model):**
 
 | Variable | Effect | Default |
 |---|---|---|
 | `PMQ_MCP_LIVE` | unset: the three trading tools are never REGISTERED; an agent cannot call a tool that does not exist | read-only |
-| `PMQ_MCP_MAX_USD` | hard cap per single order | 10 |
+| `PMQ_MCP_PAPER` | trading tools simulate fills against the real live books, keyless, nothing sent to the exchange; wins over `PMQ_MCP_LIVE` when both are set | off |
+| `PMQ_MCP_PAPER_USD` | paper starting balance | 1000 |
+| `PMQ_MCP_MAX_USD` | hard cap per single order, live and paper alike | 10 |
 | `PMQ_MCP_DAILY_USD` | cumulative BUY budget per UTC day; confirmed spend counts, an unknown outcome conservatively consumes the full requested amount until reconciled | off |
 | `POLY_*` keys | omit them entirely for a data-only server | absent |
 
