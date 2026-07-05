@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.9 (2026-07-05)
+
+* `trades_totals` now applies the same finite non-negative contract as
+  the fill parser (0.4.4): a NaN/Infinity/negative amount in one tape
+  record books zero instead of poisoning the whole exchange-truth total,
+  and a drifted non-list `/trades` body reads as truth unavailable
+  (None) instead of zeros or a TypeError. Fuzz suite extended with an
+  adversarial-tape property.
+* Internal: `trades_totals` decomposed (cyclomatic complexity 13 to 6,
+  helpers `_size_price` and `_maker_slice_totals`); every branch of the
+  0.4.6 maker-slice accounting was pinned by tests before the refactor
+  and the suite passes unchanged. Repo-wide `pyscn check` is green again.
+* Tests: a daily-budget assertion that could never fail is now
+  discriminating (buys against the exact confirmed-spend remainder),
+  reconcile's second cancel attempt, the sell-path unknown-outcome
+  message, the paper cancel_and_reconcile and paper-sell edge cases, and
+  pmq-doctor's RPC endpoint failover are pinned. Coverage 91 to 94
+  percent. Dead `_paper_reset` helper removed.
+* Packaging: CHANGELOG link added to the PyPI sidebar.
+
 ## 0.4.8 (2026-07-05)
 
 * MCP paper mode: `PMQ_MCP_PAPER=1` registers the trading tools with
