@@ -416,6 +416,39 @@ class PolymarketExecutor:
             log.warning("get_open_orders failed: %s", e)
             return None
 
+    @staticmethod
+    def _size_price(rec: dict[str, Any], size_key: str = "size",
+                    ) -> tuple[float, float] | None:
+        """(size, price) of one trade record or maker slice; None when
+        unparseable (a malformed record books nothing, fail closed)."""
+        try:
+            return float(rec.get(size_key) or 0), float(rec.get("price") or 0)
+        except (TypeError, ValueError):
+            return None
+
+    def _maker_slice_totals(self, t: dict[str, Any]) -> tuple[float, float]:
+        """(shares, usd) WE filled in one MAKER-role trade record. The
+        top-level size is the counterparty's aggregate; ours is the sum of
+        the ``maker_orders`` slices matched by funder address (every slice
+        when no funder is configured). Records without slices fall back to
+        the top-level size."""
+        mos = t.get("maker_orders")
+        if not isinstance(mos, list) or not mos:
+            sp = self._size_price(t)
+            return (sp[0], sp[1] * sp[0]) if sp is not None else (0.0, 0.0)
+        me = (self.funder or "").lower()
+        sh = usd = 0.0
+        for mo in mos:
+            if not isinstance(mo, dict):
+                continue
+            if me and str(mo.get("maker_address", "")).lower() != me:
+                continue
+            sp = self._size_price(mo, "matched_amount")
+            if sp is not None:
+                sh += sp[0]
+                usd += sp[1] * sp[0]
+        return sh, usd
+
     def trades_totals(self, condition_id: str, token_id: str | None = None,
                       side: str = "BUY", fee_rate: float = FEE_RATES["crypto"],
                       ) -> tuple[float, float, float] | None:
@@ -436,39 +469,18 @@ class PolymarketExecutor:
             return None
         sh = usd = fees = 0.0
         for t in trades or []:
-            if not isinstance(t, dict) or t.get("side") != side:
-                continue
-            if t.get("status") == "FAILED":
+            if not isinstance(t, dict) or t.get("side") != side \
+                    or t.get("status") == "FAILED":
                 continue
             if t.get("trader_side") == "MAKER":
-                mos = t.get("maker_orders")
-                if not isinstance(mos, list) or not mos:
-                    # minimal record without slices: top-level size is ours
-                    try:
-                        s, p = float(t.get("size") or 0), float(t.get("price") or 0)
-                    except (TypeError, ValueError):
-                        continue
-                    sh += s
-                    usd += p * s
-                    continue
-                me = (self.funder or "").lower()
-                for mo in mos:
-                    if not isinstance(mo, dict):
-                        continue
-                    if me and str(mo.get("maker_address", "")).lower() != me:
-                        continue
-                    try:
-                        s = float(mo.get("matched_amount") or 0)
-                        p = float(mo.get("price") or 0)
-                    except (TypeError, ValueError):
-                        continue
-                    sh += s
-                    usd += p * s
+                dsh, dusd = self._maker_slice_totals(t)
+                sh += dsh
+                usd += dusd
                 continue                       # maker fills pay zero fee
-            try:
-                s, p = float(t.get("size") or 0), float(t.get("price") or 0)
-            except (TypeError, ValueError):
+            sp = self._size_price(t)
+            if sp is None:
                 continue
+            s, p = sp
             sh += s
             usd += p * s
             fees += fee(p, s, fee_rate)
