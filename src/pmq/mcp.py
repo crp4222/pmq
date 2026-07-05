@@ -190,16 +190,20 @@ def account_collateral() -> dict[str, Any]:
 
 @mcp.tool()
 def account_trades(condition_id: str, token_id: str = "") -> dict[str, Any]:
-    """Exchange-truth totals of OUR account's BUY trades on one market:
-    (shares, usd, fee estimate). This is the reconciliation source, use it
-    after any uncertainty instead of trusting local bookkeeping."""
+    """BUY-side totals of OUR account on one market: (shares, usd,
+    fee_estimate), usd and fees counting BUY fills only. This is the
+    reconciliation source, use it after any uncertainty instead of
+    trusting local bookkeeping. Paper mode: same semantics over the
+    simulated fills, except shares are net of paper sells (position,
+    not gross buys)."""
     if PAPER_ENABLED:
         fills = [f for f in _paper["fills"]
                  if not token_id or f["token_id"] == token_id]
         return {"shares": round(sum(f["shares"] for f in fills if f["side"] == "BUY")
                                 - sum(f["shares"] for f in fills if f["side"] == "SELL"), 4),
                 "usd": round(sum(f["usd"] for f in fills if f["side"] == "BUY"), 4),
-                "fee_estimate": round(sum(f["fee"] for f in fills), 4),
+                "fee_estimate": round(sum(f["fee"] for f in fills
+                                          if f["side"] == "BUY"), 4),
                 "paper": True}
     totals = _ex().trades_totals(condition_id, token_id or None)
     if totals is None:

@@ -221,6 +221,30 @@ def test_paper_sell_needs_position_and_updates_cash(monkeypatch):
     assert m.account_collateral()["paper"]
     tot = m.account_trades(condition_id="0xc", token_id="1")
     assert tot["paper"] and abs(tot["shares"]) < 0.01   # flat after round trip
+    # BUY-side semantics, matching live trades_totals: usd and fees count
+    # the buy fill only (10 sh at 0.60), never the sell leg's fee.
+    assert abs(tot["usd"] - 6.0) < 1e-9
+    assert abs(tot["fee_estimate"] - 0.07 * 0.60 * 0.40 * 10) < 1e-9
+
+
+def test_paper_buy_excludes_nan_ask_levels(monkeypatch):
+    """json.loads accepts NaN book levels; since the data layer excludes
+    them, a NaN ask can no longer produce NaN paper fills: the valid ask
+    fills, and an all-NaN side reads as no ask at all."""
+    import math
+    m = load_paper(monkeypatch)
+    nan_book = {"asks": [{"price": "NaN", "size": "10"},
+                         {"price": "0.60", "size": "30"}],
+                "min_order_size": "5"}
+    monkeypatch.setattr(m.data, "get_book", lambda t, logger=None: nan_book)
+    out = m.fak_buy(token_id="1", price_cap=0.62, usd=6.0)
+    assert out["booked"] and out["price"] == 0.60
+    assert math.isfinite(out["matched_shares"]) and math.isfinite(out["matched_usd"])
+    assert math.isfinite(out["cash_left"]) and math.isfinite(out["fee_usd"])
+    monkeypatch.setattr(m.data, "get_book",
+                        lambda t, logger=None: {"asks": [{"price": "NaN", "size": "10"}]})
+    out2 = m.fak_buy(token_id="1", price_cap=0.99, usd=6.0)
+    assert out2["rejected"] and not out2["booked"]
 
 
 def test_paper_cancel_and_reconcile_never_builds_an_executor(monkeypatch):

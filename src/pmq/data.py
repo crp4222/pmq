@@ -23,13 +23,21 @@ from __future__ import annotations
 
 import calendar
 import json
+import logging
+import math
 import time
 import urllib.request
 from typing import Any, Callable, TypedDict
 
 Logger = Callable[[str], None]
 
+log = logging.getLogger("pmq")
+
 UA = {"User-Agent": "Mozilla/5.0"}
+#: Hard cap on HTTP response bodies (books can be big; a healthy one stays
+#: far under this). An oversized body reads as a failed GET, never a partial
+#: or unbounded read.
+_MAX_BODY = 8 * 1024 * 1024
 GAMMA = "https://gamma-api.polymarket.com"
 CLOB = "https://clob.polymarket.com"
 DATA = "https://data-api.polymarket.com"
@@ -82,12 +90,16 @@ def fee(price: float, shares: float, rate: float = FEE_RATES["crypto"]) -> float
 
 def http_get_json(url: str, retries: int = 3, timeout: float = 10,
                   logger: Logger | None = None) -> Any:
-    """GET a JSON document with linear backoff. Returns None on final failure."""
+    """GET a JSON document with linear backoff. Returns None on final failure.
+    Bodies above 8 MB read as failure too (no unbounded read)."""
     for i in range(retries):
         try:
             req = urllib.request.Request(url, headers=UA)
             with urllib.request.urlopen(req, timeout=timeout) as r:
-                return json.loads(r.read().decode())
+                body = r.read(_MAX_BODY + 1)
+                if len(body) > _MAX_BODY:
+                    raise ValueError(f"response body exceeds {_MAX_BODY} bytes")
+                return json.loads(body.decode())
         except Exception as e:
             if i == retries - 1:
                 if logger:
@@ -154,14 +166,16 @@ def parse_market(m: dict[str, Any] | None, outcome_a: str | None = None,
 
 
 def resolved_winner(pm: ParsedMarket | None) -> str | None:
-    """Winning outcome name from settled Gamma outcomePrices; None if unsettled."""
+    """Winning outcome name from settled Gamma outcomePrices; None if unsettled.
+    Prices must be finite and within [0, 1]: json.loads accepts NaN, and a
+    hostile or drifted price must never surface a winner (fail closed)."""
     if not pm:
         return None
     try:
         op = pm["outcome_prices_raw"]
         op = json.loads(op) if isinstance(op, str) else op
         op = [float(x) for x in op]
-        if max(op) < 0.99:
+        if not all(math.isfinite(v) and 0.0 <= v <= 1.0 for v in op) or max(op) < 0.99:
             return None
         ia = pm.get("idx_a", 0)
         return pm["outcome_a"] if op[ia] > op[1 - ia] else pm["outcome_b"]
@@ -170,45 +184,89 @@ def resolved_winner(pm: ParsedMarket | None) -> str | None:
 
 
 def get_book(token_id: str, logger: Logger | None = None) -> dict[str, Any] | None:
-    """Real-time CLOB book. THE live data source; never the trade tape."""
-    book: dict[str, Any] | None = http_get_json(f"{CLOB}/book?token_id={token_id}", logger=logger)
-    return book
+    """Real-time CLOB book. THE live data source; never the trade tape.
+    A non-dict body reads as no book (fail closed)."""
+    book = http_get_json(f"{CLOB}/book?token_id={token_id}", logger=logger)
+    return book if isinstance(book, dict) else None
+
+
+def _levels(side: Any) -> tuple[list[tuple[float, float]], int]:
+    """Valid (price, size) pairs of one book side plus the count of levels
+    excluded. A level counts ONLY if it parses to a finite price within
+    [0, 1] and a finite size >= 0: json.loads accepts NaN/Infinity, and a
+    malformed or hostile level must never reach a quote, a depth sum or a
+    paper fill. A side that is not a list reads as empty."""
+    if not isinstance(side, list):
+        return [], 0 if not side else 1
+    out: list[tuple[float, float]] = []
+    excluded = 0
+    for lvl in side:
+        try:
+            p, s = float(lvl["price"]), float(lvl["size"])
+        except (KeyError, TypeError, ValueError):
+            excluded += 1
+            continue
+        if math.isfinite(p) and math.isfinite(s) and 0.0 <= p <= 1.0 and s >= 0.0:
+            out.append((p, s))
+        else:
+            excluded += 1
+    return out, excluded
+
+
+def _finite_or_none(x: float) -> float | None:
+    return x if math.isfinite(x) else None
 
 
 def best_bid_ask(book: dict[str, Any] | None,
                  ) -> tuple[float | None, float | None, float | None, float | None]:
-    """(best_bid, bid_size, best_ask, ask_size), sizes summed at the level."""
-    if not book:
-        return None, None, None, None
-    bids = book.get("bids") or []
-    asks = book.get("asks") or []
-    bb = max((float(b["price"]) for b in bids), default=None)
-    ba = min((float(a["price"]) for a in asks), default=None)
-    bb_sz = sum(float(b["size"]) for b in bids if float(b["price"]) == bb) if bb is not None else None
-    ba_sz = sum(float(a["size"]) for a in asks if float(a["price"]) == ba) if ba is not None else None
+    """(best_bid, bid_size, best_ask, ask_size), sizes summed at the level.
+
+    Invalid levels (non-finite or out-of-range price or size, wrong shape)
+    are EXCLUDED, with one warning per call counting what was skipped. A
+    side with no valid level reads as empty (None quote), exactly like a
+    genuinely empty book."""
+    b = book if isinstance(book, dict) else {}
+    bids, x_bid = _levels(b.get("bids"))
+    asks, x_ask = _levels(b.get("asks"))
+    if x_bid or x_ask:
+        log.warning("best_bid_ask: excluded %d invalid book levels", x_bid + x_ask)
+    bb = max((p for p, _ in bids), default=None)
+    ba = min((p for p, _ in asks), default=None)
+    bb_sz = _finite_or_none(sum(s for p, s in bids if p == bb)) if bb is not None else None
+    ba_sz = _finite_or_none(sum(s for p, s in asks if p == ba)) if ba is not None else None
     return bb, bb_sz, ba, ba_sz
 
 
 def book_meta(book: dict[str, Any] | None) -> BookMeta:
     """Exchange metadata riding on the book response: per-market minimum
     order size (shares), tick size, neg_risk flag, last trade price. Read
-    these from the live book instead of hardcoding exchange rules."""
-    b = book or {}
+    these from the live book instead of hardcoding exchange rules.
+    Non-finite or out-of-range values fall back to None, never NaN."""
+    b: dict[str, Any] = book if isinstance(book, dict) else {}
 
-    def _f(k: str) -> float | None:
+    def _f(k: str, hi: float = math.inf) -> float | None:
         try:
-            return float(b[k])
+            v = float(b[k])
         except (KeyError, TypeError, ValueError):
             return None
-    return {"min_order_size": _f("min_order_size"), "tick_size": _f("tick_size"),
-            "neg_risk": b.get("neg_risk"), "last_trade_price": _f("last_trade_price")}
+        return v if math.isfinite(v) and 0.0 <= v <= hi else None
+
+    nr = b.get("neg_risk")
+    return {"min_order_size": _f("min_order_size"),
+            "tick_size": _f("tick_size", hi=1.0),
+            "neg_risk": nr if isinstance(nr, bool) else None,
+            "last_trade_price": _f("last_trade_price", hi=1.0)}
 
 
 def band_ask_depth_usd(book: dict[str, Any] | None, lo: float, hi: float) -> float:
-    """Total $ notional of asks resting within [lo, hi]."""
-    asks = (book or {}).get("asks") or []
-    return round(sum(float(a["price"]) * float(a["size"]) for a in asks
-                     if lo <= float(a["price"]) <= hi), 2)
+    """Total $ notional of asks resting within [lo, hi]. Invalid levels are
+    EXCLUDED (one warning per call with the count); a non-finite total
+    fails closed to 0.0."""
+    asks, excluded = _levels(book.get("asks") if isinstance(book, dict) else None)
+    if excluded:
+        log.warning("band_ask_depth_usd: excluded %d invalid book levels", excluded)
+    total = sum(p * s for p, s in asks if lo <= p <= hi)
+    return round(total, 2) if math.isfinite(total) else 0.0
 
 
 def book_inferred_winner(bid_a: float | None, bid_b: float | None,

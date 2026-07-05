@@ -36,6 +36,50 @@ def test_band_ask_depth_usd():
     assert band_ask_depth_usd(None, 0, 1) == 0
 
 
+def test_best_bid_ask_excludes_invalid_levels_and_warns_once(caplog):
+    import logging
+    book = {"bids": [{"price": "NaN", "size": "5"}, {"price": "0.90", "size": "10"},
+                     {"price": 3.7, "size": "10"}, {"price": "0.80", "size": "-4"}],
+            "asks": [{"price": "0.95", "size": "3"}, {"price": float("inf"), "size": "1"},
+                     "garbage", {"size": "9"}]}
+    with caplog.at_level(logging.WARNING, logger="pmq"):
+        assert best_bid_ask(book) == (0.90, 10.0, 0.95, 3.0)
+    warned = [r.getMessage() for r in caplog.records if "invalid book levels" in r.getMessage()]
+    assert len(warned) == 1 and "6" in warned[0]
+
+
+def test_best_bid_ask_all_invalid_side_reads_as_empty():
+    book = {"bids": [{"price": "NaN", "size": "1"}, {"price": "2", "size": "1"}],
+            "asks": [{"price": "0.95", "size": "3"}]}
+    bb, bb_sz, ba, ba_sz = best_bid_ask(book)
+    assert bb is None and bb_sz is None
+    assert (ba, ba_sz) == (0.95, 3.0)
+
+
+def test_best_bid_ask_never_raises_on_wrong_shapes():
+    assert best_bid_ask({"bids": "garbage", "asks": {"price": 1}}) == (None,) * 4
+    assert best_bid_ask(["not", "a", "book"]) == (None,) * 4
+    assert best_bid_ask({"bids": [[], 42, None], "asks": [True]}) == (None,) * 4
+
+
+def test_band_ask_depth_excludes_invalid_levels():
+    book = {"asks": [{"price": "0.92", "size": "10"},
+                     {"price": "NaN", "size": "50"},
+                     {"price": "0.95", "size": "-9"},
+                     {"price": "3.7", "size": "10"},
+                     {"price": "0.96", "size": "x"}]}
+    assert band_ask_depth_usd(book, 0.90, 0.97) == 9.2
+    assert band_ask_depth_usd({"asks": "junk"}, 0, 1) == 0.0
+
+
+def test_get_book_rejects_non_dict_bodies(monkeypatch):
+    from pmq import data as d
+    monkeypatch.setattr(d, "http_get_json", lambda url, logger=None: ["not", "a", "book"])
+    assert d.get_book("111") is None
+    monkeypatch.setattr(d, "http_get_json", lambda url, logger=None: {"asks": []})
+    assert d.get_book("111") == {"asks": []}
+
+
 def _gamma_market(outcomes=("Up", "Down"), prices=("0.999", "0.001")):
     return {"conditionId": "0xc0nd", "outcomes": json.dumps(list(outcomes)),
             "clobTokenIds": json.dumps(["111", "222"]),
@@ -70,6 +114,15 @@ def test_resolved_winner():
     assert resolved_winner(None) is None
 
 
+def test_resolved_winner_rejects_non_finite_or_out_of_range_prices():
+    """A NaN price defeats every comparison (max(op) < 0.99 reads False),
+    which used to surface outcome_b as a winner on an UNSETTLED market.
+    Non-finite or out-of-range settlement prices must read as unsettled."""
+    for prices in (("NaN", "0.001"), ("0.3", "NaN"), ("Infinity", "0"),
+                   ("3.7", "0.2"), ("-1", "1")):
+        assert resolved_winner(parse_market(_gamma_market(prices=prices))) is None
+
+
 def test_book_meta_reads_exchange_rules_from_the_book():
     from pmq import book_meta
     meta = book_meta({"min_order_size": "5", "tick_size": "0.001",
@@ -77,6 +130,20 @@ def test_book_meta_reads_exchange_rules_from_the_book():
     assert meta == {"min_order_size": 5.0, "tick_size": 0.001,
                     "neg_risk": True, "last_trade_price": 0.123}
     assert book_meta(None)["min_order_size"] is None
+
+
+def test_book_meta_invalid_values_fall_back_to_none():
+    """json.loads accepts NaN/Infinity; exchange rules that are non-finite
+    or out of range read as None (unknown), never NaN."""
+    from pmq import book_meta
+    meta = book_meta({"min_order_size": "NaN", "tick_size": float("inf"),
+                      "neg_risk": "yes", "last_trade_price": "-0.2"})
+    assert meta == {"min_order_size": None, "tick_size": None,
+                    "neg_risk": None, "last_trade_price": None}
+    assert book_meta({"tick_size": "3.7"})["tick_size"] is None
+    assert book_meta({"min_order_size": "-5"})["min_order_size"] is None
+    assert book_meta({"last_trade_price": "1.5"})["last_trade_price"] is None
+    assert book_meta("not a dict")["min_order_size"] is None
 
 
 def test_book_inferred_winner():
@@ -110,6 +177,34 @@ def test_http_get_json_success_and_permanent_failure(monkeypatch):
     monkeypatch.setattr(d.time, "sleep", lambda s: None)
     assert d.http_get_json("http://x", logger=logged.append) is None
     assert logged and "permanently" in logged[0]
+
+
+def test_http_get_json_caps_response_size(monkeypatch):
+    """A misbehaving endpoint cannot feed an unbounded body: above the cap
+    the GET reads as a failure (None), at or under it parses normally."""
+    import io
+    import urllib.request
+
+    from pmq import data as d
+
+    class FakeResp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(d, "_MAX_BODY", 64)
+    monkeypatch.setattr(d.time, "sleep", lambda s: None)
+    big = b"[" + b"1," * 60 + b"1]"          # 123 bytes, over the 64-byte cap
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda req, timeout=10: FakeResp(big))
+    logged = []
+    assert d.http_get_json("http://x", logger=logged.append) is None
+    assert logged and "exceeds" in logged[0]
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda req, timeout=10: FakeResp(b'{"a": 1}'))
+    assert d.http_get_json("http://x") == {"a": 1}
 
 
 def test_get_market_falls_back_to_events(monkeypatch):

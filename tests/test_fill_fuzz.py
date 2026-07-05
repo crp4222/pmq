@@ -39,6 +39,9 @@ class FuzzClient:
     def cancel_market_orders(self, payload):
         pass
 
+    def cancel_orders(self, order_hashes):
+        pass
+
     def get_open_orders(self, params=None, only_first_page=False, next_cursor=None):
         return []
 
@@ -46,6 +49,9 @@ class FuzzClient:
         return []
 
     def get_balance_allowance(self, params=None):
+        return {}
+
+    def get_clob_market_info(self, condition_id):
         return {}
 
 

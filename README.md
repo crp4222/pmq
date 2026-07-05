@@ -251,7 +251,7 @@ cares which model drives it.
 | `book` | nothing | real-time bid/ask with sizes, depth in a price range, exchange minimums |
 | `taker_fee` | nothing | official fee formula per category, cost per share including fee |
 | `account_collateral` | keys | CLOB-visible balance, with sig_type diagnostic |
-| `account_trades` | keys | exchange-truth totals of our trades on one market |
+| `account_trades` | keys | exchange-truth BUY totals of our account on one market |
 | `fak_buy` | keys + `PMQ_MCP_LIVE=1` | open a position: fill-and-kill buy, nothing ever rests |
 | `fak_sell` | keys + `PMQ_MCP_LIVE=1` | close a position: fill-and-kill sell, same contract |
 | `cancel_and_reconcile` | keys + `PMQ_MCP_LIVE=1` | cancel everything resting on a market, return exchange truth |

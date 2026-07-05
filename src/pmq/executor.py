@@ -116,11 +116,13 @@ class Fill:
 # 1.0.2 by introspection. If the installed client drifts, we refuse to start.
 _EXPECTED_METHODS: dict[str, tuple[str, ...]] = {
     "create_and_post_market_order": ("order_args", "order_type"),
-    "create_and_post_order": ("order_args", "order_type"),
+    "create_and_post_order": ("order_args", "order_type", "post_only"),
     "cancel_market_orders": ("payload",),
+    "cancel_orders": ("order_hashes",),
     "get_open_orders": ("params",),
     "get_trades": ("params",),
     "get_balance_allowance": ("params",),
+    "get_clob_market_info": ("condition_id",),
 }
 _EXPECTED_MARKET_ARGS: tuple[str, ...] = (
     "token_id", "amount", "side", "price", "builder_code")

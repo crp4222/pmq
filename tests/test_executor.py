@@ -35,6 +35,9 @@ class FakeClient:
     def cancel_market_orders(self, payload):
         self.calls.append(("cancel", payload))
 
+    def cancel_orders(self, order_hashes):
+        self.calls.append(("cancel_orders", order_hashes))
+
     def get_open_orders(self, params=None, only_first_page=False, next_cursor=None):
         return self.open
 
@@ -43,6 +46,9 @@ class FakeClient:
 
     def get_balance_allowance(self, params=None):
         return self.balance
+
+    def get_clob_market_info(self, condition_id):
+        raise RuntimeError("market info unavailable")
 
 
 def make(client, **kw):
@@ -188,6 +194,73 @@ def test_builder_config_reaches_the_real_client(monkeypatch):
     assert captured["builder_config"].builder_code == DEFAULT_BUILDER_CODE
 
 
+def _spy_clob(monkeypatch, captured):
+    """Monkeypatch the real ClobClient with a signature-compatible spy that
+    records construction kwargs (same pattern as the BuilderConfig test)."""
+    import py_clob_client_v2.client as real
+
+    class SpyClob(FakeClient):
+        def __init__(self, host, chain_id=None, key=None, signature_type=None,
+                     funder=None, builder_config=None, use_server_time=True,
+                     retry_on_error=True):
+            super().__init__()
+            captured.update(host=host, chain_id=chain_id, key=key,
+                            signature_type=signature_type, funder=funder,
+                            builder_config=builder_config)
+
+    monkeypatch.setattr(real, "ClobClient", SpyClob)
+
+
+def test_real_construction_reads_sig_type_and_funder_from_env(monkeypatch):
+    captured = {}
+    _spy_clob(monkeypatch, captured)
+    monkeypatch.setenv("POLY_SIG_TYPE", "3")
+    monkeypatch.setenv("POLY_FUNDER", "0x" + "f" * 40)
+    ex = PolymarketExecutor(key="0x" + "1" * 64, derive_creds=False,
+                            builder_code=None)
+    assert captured["signature_type"] == 3          # env string parsed to int
+    assert isinstance(captured["signature_type"], int)
+    assert captured["funder"] == "0x" + "f" * 40
+    assert ex.funder == "0x" + "f" * 40             # stored on the real branch
+
+
+def test_real_construction_defaults_sig_type_zero_and_no_funder(monkeypatch):
+    captured = {}
+    _spy_clob(monkeypatch, captured)
+    monkeypatch.delenv("POLY_SIG_TYPE", raising=False)
+    monkeypatch.delenv("POLY_FUNDER", raising=False)
+    ex = PolymarketExecutor(key="0x" + "1" * 64, derive_creds=False,
+                            builder_code=None)
+    assert captured["signature_type"] == 0 and captured["funder"] is None
+    assert ex.funder is None
+
+
+def test_sig_type_above_zero_without_funder_is_refused(monkeypatch):
+    captured = {}
+    _spy_clob(monkeypatch, captured)
+    monkeypatch.delenv("POLY_FUNDER", raising=False)
+    with pytest.raises(ValueError, match="funder"):
+        PolymarketExecutor(key="0x" + "1" * 64, signature_type=3,
+                           derive_creds=False, builder_code=None)
+    assert not captured                 # refused before any client was built
+
+
+def test_missing_key_is_refused(monkeypatch):
+    captured = {}
+    _spy_clob(monkeypatch, captured)
+    monkeypatch.delenv("POLY_PRIVATE_KEY", raising=False)
+    with pytest.raises(ValueError, match="POLY_PRIVATE_KEY"):
+        PolymarketExecutor(builder_code=None)
+    assert not captured
+
+
+def test_funder_stored_on_injected_client_branch(monkeypatch):
+    monkeypatch.delenv("POLY_FUNDER", raising=False)
+    assert make(FakeClient(), funder="0x" + "a" * 40).funder == "0x" + "a" * 40
+    monkeypatch.setenv("POLY_FUNDER", "0x" + "b" * 40)
+    assert make(FakeClient()).funder == "0x" + "b" * 40
+
+
 def test_installed_client_injects_builder_config_on_both_paths():
     """Regression canary for the dependency itself: py-clob-client-v2 must
     keep injecting the client-level BuilderConfig into limit AND market
@@ -285,6 +358,29 @@ def test_introspection_guard_covers_order_args_builder_code(monkeypatch):
         make(FakeClient())
 
 
+def test_introspection_guard_covers_every_member_the_executor_calls():
+    """0.4.10: the expected-surface table also covers cancel_orders (the
+    cancel_order safety path), post_only on create_and_post_order and
+    get_clob_market_info (fee_rate). A client missing any of them is
+    refused at startup, not discovered on the first failing call."""
+    class NoCancelOrders(FakeClient):
+        cancel_orders = None
+    with pytest.raises(IntrospectionMismatch, match="cancel_orders"):
+        make(NoCancelOrders())
+
+    class NoPostOnly(FakeClient):
+        def create_and_post_order(self, order_args, options=None,
+                                  order_type="GTC", defer_exec=False):
+            return None
+    with pytest.raises(IntrospectionMismatch, match="post_only"):
+        make(NoPostOnly())
+
+    class NoMarketInfo(FakeClient):
+        get_clob_market_info = None
+    with pytest.raises(IntrospectionMismatch, match="get_clob_market_info"):
+        make(NoMarketInfo())
+
+
 def test_reconcile_cancels_then_reports_truth():
     fc = FakeClient(trades=[{"side": "BUY", "size": "2", "price": "0.95"}],
                     open_orders=[])
@@ -305,17 +401,18 @@ def test_fee_rate_authoritative_with_fallback():
         def get_clob_market_info(self, condition_id):
             return {"fd": {"r": 0.03, "e": 1}}
     assert make(WithInfo()).fee_rate("0xc") == 0.03
-    assert make(FakeClient()).fee_rate("0xc") == 0.07  # fallback: method missing
+    assert make(FakeClient()).fee_rate("0xc") == 0.07  # fallback: endpoint fails
 
 
 def test_cancel_order_single():
-    class WithCancel(FakeClient):
-        def cancel_orders(self, order_hashes):
-            self.calls.append(("cancel_orders", order_hashes))
-    fc = WithCancel()
+    fc = FakeClient()
     assert make(fc).cancel_order("0xdead") is True
     assert ("cancel_orders", ["0xdead"]) in fc.calls
-    assert make(FakeClient()).cancel_order("0xdead") is False
+
+    class CancelBoom(FakeClient):
+        def cancel_orders(self, order_hashes):
+            raise RuntimeError("down")
+    assert make(CancelBoom()).cancel_order("0xdead") is False
 
 
 def test_private_key_never_appears_in_logs(monkeypatch, caplog):
