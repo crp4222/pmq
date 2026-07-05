@@ -158,3 +158,32 @@ def test_unresolvable_market_fails_the_run(setup, capsys, monkeypatch):
     monkeypatch.setattr(doctor, "get_market", lambda slug: None)
     assert doctor.main(["--market", "nope"]) == 1
     assert "resolvable" in capsys.readouterr().out
+
+
+def test_rpc_walks_the_endpoint_list_and_rejects_error_bodies(monkeypatch):
+    """The real _rpc: a dead endpoint fails over to the next one; a JSON-RPC
+    error body raises instead of being returned as a result."""
+    import io
+    import json as js
+
+    calls = []
+
+    def flaky_urlopen(req, timeout=0):
+        calls.append(req.full_url)
+        if len(calls) == 1:
+            raise OSError("connect timeout")
+        return io.BytesIO(js.dumps(
+            {"jsonrpc": "2.0", "id": 1, "result": "0x2a"}).encode())
+
+    monkeypatch.setattr(doctor.urllib.request, "urlopen", flaky_urlopen)
+    assert doctor._rpc("eth_getCode", ["0x0", "latest"]) == "0x2a"
+    assert calls[0] != calls[1]                 # second endpoint answered
+
+    def error_body(req, timeout=0):
+        return io.BytesIO(js.dumps(
+            {"jsonrpc": "2.0", "id": 1,
+             "error": {"code": -32000, "message": "nope"}}).encode())
+
+    monkeypatch.setattr(doctor.urllib.request, "urlopen", error_body)
+    with pytest.raises(RuntimeError):
+        doctor._rpc("eth_getCode", ["0x0", "latest"])

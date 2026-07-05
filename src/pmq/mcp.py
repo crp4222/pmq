@@ -177,12 +177,6 @@ def taker_fee(price: float, shares: float, category: str = "crypto") -> dict[str
 _paper: dict[str, Any] = {"cash": PAPER_START_USD, "positions": {}, "fills": []}
 
 
-def _paper_reset() -> None:
-    _paper["cash"] = PAPER_START_USD
-    _paper["positions"] = {}
-    _paper["fills"] = []
-
-
 @mcp.tool()
 def account_collateral() -> dict[str, Any]:
     """Collateral (pUSD, $) the CLOB sees for the configured account. If this

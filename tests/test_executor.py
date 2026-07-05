@@ -293,6 +293,13 @@ def test_reconcile_cancels_then_reports_truth():
     assert fc.calls and fc.calls[0][0] == "cancel"
 
 
+def test_reconcile_retries_cancel_when_orders_stay_open():
+    fc = FakeClient(trades=[], open_orders=[{"id": "0x1"}])
+    out = make(fc).reconcile("0xc")
+    assert [c[0] for c in fc.calls].count("cancel") == 2
+    assert out == (0.0, 0.0, 0.0)
+
+
 def test_fee_rate_authoritative_with_fallback():
     class WithInfo(FakeClient):
         def get_clob_market_info(self, condition_id):

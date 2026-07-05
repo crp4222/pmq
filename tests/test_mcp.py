@@ -129,6 +129,8 @@ def test_live_tools_book_only_confirmed_fills(monkeypatch):
     m._executor = FakeExecutor(uncertain=True)
     assert "outcome unknown" in m.fak_buy(token_id="111", price_cap=0.97,
                                           usd=5.0)["error"]
+    assert "outcome unknown" in m.fak_sell(token_id="111", price_floor=0.95,
+                                           shares=5.0)["error"]
     m._executor = FakeExecutor()
     out = m.cancel_and_reconcile(condition_id="0xc")
     assert out["cancelled"] and out["shares"] == 2.0
@@ -144,7 +146,9 @@ def test_daily_budget_blocks_and_counts_only_real_spend(monkeypatch):
     assert m.fak_buy(token_id="t", price_cap=0.97, usd=5.0)["booked"]
     out = m.fak_buy(token_id="t", price_cap=0.97, usd=5.0)
     assert "daily buy budget" in out.get("error", "")      # 4.9 + 5 > 8
-    assert m.fak_buy(token_id="t", price_cap=0.97, usd=3.0)["booked"] is False or True
+    # 3.05 fits ONLY if the confirmed 4.9 was counted (left 3.1); counting
+    # the requested 5.0 would leave 3.0 and refuse this order.
+    assert m.fak_buy(token_id="t", price_cap=0.97, usd=3.05)["booked"]
 
 
 def test_daily_budget_rejected_orders_cost_nothing(monkeypatch):
@@ -217,3 +221,22 @@ def test_paper_sell_needs_position_and_updates_cash(monkeypatch):
     assert m.account_collateral()["paper"]
     tot = m.account_trades(condition_id="0xc", token_id="1")
     assert tot["paper"] and abs(tot["shares"]) < 0.01   # flat after round trip
+
+
+def test_paper_cancel_and_reconcile_never_builds_an_executor(monkeypatch):
+    m = load_paper(monkeypatch)
+    out = m.cancel_and_reconcile(condition_id="0xc")
+    assert out["cancelled"] and out["paper"]
+    assert m._executor is None                  # the exchange stays out of reach
+
+
+def test_paper_sell_fails_closed_on_missing_book_or_bid(monkeypatch):
+    m = load_paper(monkeypatch)
+    monkeypatch.setattr(m.data, "get_book", lambda t, logger=None: dict(BOOK))
+    m.fak_buy(token_id="1", price_cap=0.62, usd=6.0)
+    monkeypatch.setattr(m.data, "get_book", lambda t, logger=None: None)
+    assert "error" in m.fak_sell(token_id="1", price_floor=0.5, shares=5.0)
+    monkeypatch.setattr(m.data, "get_book",
+                        lambda t, logger=None: {"bids": [], "asks": []})
+    out = m.fak_sell(token_id="1", price_floor=0.5, shares=5.0)
+    assert out["rejected"] and "no bid" in out["error"]
