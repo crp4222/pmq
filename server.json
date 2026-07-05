@@ -72,6 +72,18 @@
           "description": "Optional bytes32 builder attribution code. Defaults to the maintainer's public zero-commission code (disclosed in the README); set your own or leave empty to opt out.",
           "isRequired": false,
           "isSecret": false
+        },
+        {
+          "name": "POLY_ORDER_LOG",
+          "description": "Append-only file of this server's own order ids. Enables order attribution when several senders share one wallet: account totals then count only orders placed through this server. Optional; without it behavior is unchanged.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "POLY_FOREIGN_ORDER_LOGS",
+          "description": "Colon-separated registry files of the wallet's other order-senders. Reconciliation claims trades unknown to every registry. Sound only if every sender on the wallet keeps a registry.",
+          "isRequired": false,
+          "isSecret": false
         }
       ]
     }

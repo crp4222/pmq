@@ -2,8 +2,10 @@
 
 pmq is a small Python library for Polymarket CLOB V2 with two layers, plus
 an MCP server (`pmq-mcp`) exposing both to any MCP client; its trading
-tools exist only when the operator sets PMQ_MCP_LIVE=1, capped per order
-(PMQ_MCP_MAX_USD) and per day (PMQ_MCP_DAILY_USD).
+tools exist only when the operator sets PMQ_MCP_LIVE=1 (live) or
+PMQ_MCP_PAPER=1 (fills simulated against the real live books, keyless,
+nothing reaches the exchange, wins over live), capped per order
+(PMQ_MCP_MAX_USD) and per UTC day (PMQ_MCP_DAILY_USD).
 
 ## Data layer (no credentials, safe anywhere)
 
@@ -41,3 +43,9 @@ Rules an agent MUST follow:
 8. Builder attribution: the library defaults to the maintainer's
    zero-commission builder code. Respect the user's choice if they set
    `builder_code=None` or their own code; do not change it silently.
+9. Shared wallets: when several senders trade one wallet, each configures
+   its own append-only registry (`POLY_ORDER_LOG`) and lists the others in
+   `POLY_FOREIGN_ORDER_LOGS` (colon-separated). `trades_totals()` then
+   counts only OUR orders, and `reconcile()` claims trades unknown to
+   every registry (post-uncertainty recovery). Sound only if every sender
+   keeps a registry; without `POLY_ORDER_LOG` behavior is unchanged.

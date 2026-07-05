@@ -91,3 +91,24 @@ except pmq.OrderUncertain:
     sh, usd_spent, fees = ex.reconcile(pm["condition_id"], token)
     # book sh/usd_spent, nothing else, and only now place new orders
 ```
+
+## Several bots, one wallet
+
+`get_trades` is account-level: two senders on the same wallet see each
+other's fills in their totals. Give each sender its own append-only
+registry and point it at the others':
+
+```bash
+# bot A's environment
+export POLY_ORDER_LOG=/srv/bots/a.orders
+export POLY_FOREIGN_ORDER_LOGS=/srv/bots/b.orders
+# bot B mirrors it: its own file as POLY_ORDER_LOG, A's as foreign
+```
+
+Every confirmed order id is appended to our registry. `trades_totals()`
+then counts only trades whose `taker_order_id` (taker role) or
+`maker_orders[].order_id` slice (maker role) is in OUR registry, and
+`reconcile()` claims trades unknown to EVERY registry, so a fill posted
+during an uncertainty window is recovered by the bot that was uncertain
+and by nobody else. Sound only if every sender on the wallet keeps a
+registry. Without `POLY_ORDER_LOG` nothing changes.

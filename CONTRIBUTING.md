@@ -48,6 +48,17 @@ agents EDITING it. Read both before changing code.)
    conservatively; both caps apply in paper too). Read tools must keep
    working with zero credentials. The README tool and rails tables are part
    of the contract: keep them in sync with the registered tools.
+7. **Order attribution is opt-in and never over-claims**: without a
+   configured `order_log` (env `POLY_ORDER_LOG`) behavior must stay
+   identical to the unconfigured library. In only-mine mode
+   `trades_totals` counts a trade ONLY when its `taker_order_id` or
+   `maker_orders[].order_id` slice is in OUR registry; trades unknown to
+   every registry are claimed exclusively via `claim_unknown`, which only
+   `reconcile()` sets (post-uncertainty recovery). Registries are
+   append-only; a registry write failure degrades toward reconcile
+   claiming and must never block trading. Soundness requires every sender
+   on the wallet to keep a registry: state that wherever the feature is
+   documented.
 
 ## Working rules
 

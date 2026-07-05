@@ -13,7 +13,9 @@
 Fail-closed execution and market data for **Polymarket CLOB V2**, in Python,
 built agent-first. Local signing (your keys never leave your process),
 exchange-confirmed fills only, fee-correct math, deposit-wallet
-(`POLY_1271`) support that actually works in production, and a bundled
+(`POLY_1271`) support that actually works in production, order-attribution
+registries (several bots can share one wallet, each with its own
+exchange-truth accounting), and a bundled
 **MCP server**: plug any LLM or agent framework that speaks MCP (Claude,
 ChatGPT, LangChain, your own loop) on top and it can read every market and,
 if and only if the operator enables it, trade under hard rails: tools that
@@ -203,6 +205,30 @@ orders through changed semantics. The whole table is pinned by an executable
 test per row plus a hypothesis fuzz suite (hundreds of generated adversarial
 responses per run, including NaN/Infinity and negative amounts, which book
 zero).
+
+## Several bots, one wallet
+
+`get_trades` is account-level: run two bots on the same wallet and each
+one's exchange-truth totals silently include the other's fills. Since
+0.5.0 every order-sender can keep an **attribution registry**: an
+append-only file of its own order ids, written on every confirmed post.
+
+```python
+ex = PolymarketExecutor(order_log="botA.orders",
+                        foreign_order_logs=["botB.orders"])
+# or per process: POLY_ORDER_LOG=botA.orders POLY_FOREIGN_ORDER_LOGS=botB.orders
+```
+
+With a registry configured, `trades_totals()` counts only trades whose
+`taker_order_id` (taker role) or `maker_orders[].order_id` slice (maker
+role) belongs to OUR registry (both fields verified present and populated
+on real V2 trade records), and `reconcile()` additionally claims trades
+unknown to EVERY registry, so a fill posted during an uncertainty window
+is recovered by the bot that was uncertain and by nobody else. Sound only
+if every sender on the wallet keeps a registry
+(`POLY_FOREIGN_ORDER_LOGS` is colon-separated). The MCP server inherits
+the registries through the same environment variables. Fully opt-in:
+without `POLY_ORDER_LOG` the behavior is unchanged.
 
 ## The signature_type decoder table
 
