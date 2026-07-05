@@ -420,11 +420,16 @@ class PolymarketExecutor:
     def _size_price(rec: dict[str, Any], size_key: str = "size",
                     ) -> tuple[float, float] | None:
         """(size, price) of one trade record or maker slice; None when
-        unparseable (a malformed record books nothing, fail closed)."""
+        unparseable (a malformed record books nothing, fail closed).
+        Same finiteness contract as :meth:`_parse_fill`: json.loads accepts
+        NaN/Infinity, and one such record must not poison the totals."""
         try:
-            return float(rec.get(size_key) or 0), float(rec.get("price") or 0)
+            s, p = float(rec.get(size_key) or 0), float(rec.get("price") or 0)
         except (TypeError, ValueError):
             return None
+        if not (math.isfinite(s) and math.isfinite(p)) or s < 0 or p < 0:
+            return None
+        return s, p
 
     def _maker_slice_totals(self, t: dict[str, Any]) -> tuple[float, float]:
         """(shares, usd) WE filled in one MAKER-role trade record. The
@@ -466,6 +471,10 @@ class PolymarketExecutor:
                 self._t["TradeParams"](market=condition_id, asset_id=token_id))
         except Exception as e:
             log.warning("get_trades(%s) failed: %s", condition_id, e)
+            return None
+        if trades is not None and not isinstance(trades, list):
+            # drifted body shape: refuse to claim truth rather than guess
+            log.warning("get_trades(%s) returned a non-list body", condition_id)
             return None
         sh = usd = fees = 0.0
         for t in trades or []:

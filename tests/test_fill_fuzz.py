@@ -116,3 +116,27 @@ def test_any_transport_exception_becomes_order_uncertain(exc_type, msg):
         ex.buy_fak("tok", 0.97, 5.0)
     with pytest.raises(OrderUncertain):
         ex.limit_gtc("tok", 0.50, 10.0, "BUY")
+
+
+trade_rows = st.one_of(jsonish, st.dictionaries(
+    st.one_of(st.sampled_from(["side", "size", "price", "status",
+                               "trader_side", "maker_orders",
+                               "maker_address", "matched_amount"]),
+              st.text(max_size=8)),
+    jsonish, max_size=6))
+
+
+@given(trades=st.one_of(jsonish, st.lists(trade_rows, max_size=5)))
+@settings(max_examples=250, deadline=None)
+def test_trades_totals_is_finite_non_negative_or_none(trades):
+    """Reconciliation truth under an adversarial tape: whatever get_trades
+    returns, trades_totals yields finite non-negative totals or None
+    (truth unavailable), and never raises."""
+    class TapeClient(FuzzClient):
+        def get_trades(self, params=None, only_first_page=False,
+                       next_cursor=None):
+            return trades
+    out = PolymarketExecutor(client=TapeClient(),
+                             builder_code=None).trades_totals("0xc")
+    if out is not None:
+        assert all(math.isfinite(v) and v >= 0.0 for v in out)

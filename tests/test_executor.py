@@ -465,3 +465,33 @@ def test_trades_totals_none_when_api_unreachable_but_zeros_on_empty():
     assert make(Boom()).trades_totals("0xc") is None
     assert make(FakeClient(trades=None)).trades_totals("0xc") == (0.0, 0.0, 0.0)
     assert make(FakeClient(trades=[])).trades_totals("0xc") == (0.0, 0.0, 0.0)
+
+
+def test_trades_totals_non_finite_or_negative_amounts_book_zero(monkeypatch):
+    """json.loads accepts NaN/Infinity; one hostile or corrupt tape record
+    must not poison exchange-truth totals (NaN compares false everywhere,
+    the exact re-buy failure mode reconcile exists to prevent). Same
+    finite non-negative contract as the fill parser since 0.4.4."""
+    monkeypatch.delenv("POLY_FUNDER", raising=False)
+    good = {"side": "BUY", "size": "2", "price": "0.5", "trader_side": "TAKER"}
+    for bad in ("NaN", "Infinity", "-3", float("nan"), float("inf"), -1.0):
+        rows = [{"side": "BUY", "size": bad, "price": "0.5",
+                 "trader_side": "TAKER"},
+                {"side": "BUY", "size": bad, "price": "0.5",
+                 "trader_side": "MAKER"},
+                {"side": "BUY", "trader_side": "MAKER", "maker_orders": [
+                    {"maker_address": "", "matched_amount": bad, "price": "0.5"}]},
+                {"side": "BUY", "size": "2", "price": bad,
+                 "trader_side": "TAKER"},
+                dict(good)]
+        sh, usd, fees = make(FakeClient(trades=rows)).trades_totals("0xc")
+        assert sh == 2.0 and abs(usd - 1.0) < 1e-9
+        assert abs(fees - 0.07 * 0.5 * 0.5 * 2) < 1e-9
+
+
+def test_trades_totals_non_list_body_is_not_truth():
+    """A drifted /trades body shape (dict, string, number) must read as
+    'truth unavailable' (None), never as zeros that would trigger a
+    re-buy, and never raise."""
+    for body in ({"error": "nope"}, "FAIL", 7, True):
+        assert make(FakeClient(trades=body)).trades_totals("0xc") is None
