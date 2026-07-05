@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.4.10 (2026-07-05)
+
+* Book-level validation in the data layer: `best_bid_ask` and
+  `band_ask_depth_usd` no longer trust `float(level["price"])`. A level
+  counts only if it parses to a finite price within [0, 1] and a finite
+  size >= 0; invalid levels are EXCLUDED with one counted warning per
+  call, and a side with no valid level reads as empty (None quote, the
+  shape every caller already handles). This closes the last parser that
+  could still raise through the MCP `book` tool (malformed level) or
+  pass NaN into comparisons and paper fills. `book_meta` joins the same
+  contract (non-finite or out-of-range metadata reads as None, never
+  NaN), `get_book` refuses non-dict bodies, and `resolved_winner` no
+  longer surfaces a winner from non-finite or out-of-range settlement
+  prices (a NaN price used to defeat the settled check and name the
+  wrong side). Fuzz suite extended with an adversarial-book hypothesis
+  property plus deterministic pins; a NaN ask producing NaN paper fills
+  is pinned as impossible.
+* Startup introspection completed: `_EXPECTED_METHODS` now also covers
+  `cancel_orders` (the `cancel_order` safety path), `post_only` on
+  `create_and_post_order` and `get_clob_market_info` (`fee_rate`), all
+  three verified present on py-clob-client-v2 1.0.2 by introspection.
+  A client missing any of them is refused at startup instead of failing
+  on the first call; pmq-doctor consumes the same table and inherits
+  the checks.
+* `http_get_json` caps response bodies at 8 MB: an oversized body reads
+  as a failed GET (None), never an unbounded read.
+* MCP paper mode: `account_trades` now counts BUY-side fees only,
+  matching the live `trades_totals` semantics; the tool docstring and
+  the README table row state the semantics exactly.
+* Tests: the real-client construction branches are pinned (POLY_SIG_TYPE
+  read from the environment and parsed to int, signature_type above 0
+  without a funder refused, missing key refused, funder stored on both
+  construction branches). 157 tests.
+* Packaging: `Repository` URL added to the PyPI sidebar.
+
 ## 0.4.9 (2026-07-05)
 
 * `trades_totals` now applies the same finite non-negative contract as
