@@ -407,3 +407,61 @@ def test_trades_totals_taker_records_unchanged(monkeypatch):
                                          "price": "0.9", "status": "FAILED"}]))
     sh, usd, fees = ex.trades_totals("0xc")
     assert sh == 5.2 and abs(usd - 4.94) < 1e-9 and fees > 0
+
+
+def test_trades_totals_without_funder_counts_every_slice(monkeypatch):
+    """No POLY_FUNDER set: every slice of a bundled maker record is
+    attributed to us (the documented reason to set POLY_FUNDER even on
+    sig 0 accounts that post resting orders)."""
+    monkeypatch.delenv("POLY_FUNDER", raising=False)
+    sh, usd, fees = make(FakeClient(trades=[MAKER_RECORD])).trades_totals("0xc")
+    assert abs(sh - (5 + 21.461537)) < 1e-9
+    assert abs(usd - (5 * 0.39 + 21.461537 * 0.3500000023297493)) < 1e-9
+    assert fees == 0.0
+
+
+def test_trades_totals_funder_match_is_case_insensitive(monkeypatch):
+    monkeypatch.setenv(
+        "POLY_FUNDER", "0x76CD962FC8C5F5E5A0CBE14C74339AA78268DA58")
+    sh, usd, fees = make(FakeClient(trades=[MAKER_RECORD])).trades_totals("0xc")
+    assert sh == 5.0 and abs(usd - 1.95) < 1e-9 and fees == 0.0
+
+
+def test_trades_totals_sliceless_maker_records_use_top_level_size(monkeypatch):
+    """maker_orders missing, empty or non-list: the top-level size is ours
+    (minimal records), still at zero fee."""
+    monkeypatch.delenv("POLY_FUNDER", raising=False)
+    for mos in ({}, {"maker_orders": []}, {"maker_orders": "not-a-list"}):
+        rec = {"side": "BUY", "size": "3", "price": "0.5",
+               "trader_side": "MAKER", **mos}
+        sh, usd, fees = make(FakeClient(trades=[rec])).trades_totals("0xc")
+        assert (sh, usd, fees) == (3.0, 1.5, 0.0)
+
+
+def test_trades_totals_skips_malformed_rows_and_slices(monkeypatch):
+    """Non-dict rows, unparseable amounts and non-dict slices are skipped;
+    well-formed records still count (fail closed, never raise)."""
+    monkeypatch.setenv("POLY_FUNDER", "0x76cD962FC8C5f5E5a0CBE14C74339AA78268dA58")
+    me = "0x76cD962FC8C5f5E5a0CBE14C74339AA78268dA58"
+    trades = [
+        "garbage", None, 42,
+        {"side": "BUY", "size": "x", "price": "0.9", "trader_side": "TAKER"},
+        {"side": "BUY", "size": "3", "price": "y", "trader_side": "MAKER"},
+        {"side": "BUY", "trader_side": "MAKER", "maker_orders": [
+            "not-a-dict",
+            {"maker_address": me, "matched_amount": "bad", "price": "1"},
+            {"maker_address": me, "matched_amount": "2", "price": "0.5"}]},
+        {"side": "BUY", "size": "1", "price": "0.6", "trader_side": "TAKER"},
+    ]
+    sh, usd, fees = make(FakeClient(trades=trades)).trades_totals("0xc")
+    assert abs(sh - 3.0) < 1e-9 and abs(usd - 1.6) < 1e-9
+    assert abs(fees - 0.07 * 0.6 * 0.4 * 1) < 1e-9  # only the taker row
+
+
+def test_trades_totals_none_when_api_unreachable_but_zeros_on_empty():
+    class Boom(FakeClient):
+        def get_trades(self, params=None, only_first_page=False, next_cursor=None):
+            raise RuntimeError("down")
+    assert make(Boom()).trades_totals("0xc") is None
+    assert make(FakeClient(trades=None)).trades_totals("0xc") == (0.0, 0.0, 0.0)
+    assert make(FakeClient(trades=[])).trades_totals("0xc") == (0.0, 0.0, 0.0)
