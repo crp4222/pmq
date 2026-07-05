@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -88,10 +88,10 @@ footer .stale{color:var(--warn);font-weight:600}
     <h1>pmq bot</h1>
     <div class="pill"><span class="dot" id="stDot"></span><span id="stTxt">…</span><small id="stUp"></small></div>
   </header>
-  <div class="offline" id="offline">connexion au Pi perdue, données figées</div>
+  <div class="offline" id="offline">connection to the host lost, data frozen</div>
 
   <div class="card hero">
-    <h2 id="heroLbl">PnL aujourd'hui <span>(live · jour UTC)</span></h2>
+    <h2 id="heroLbl">PnL today <span>(live · UTC day)</span></h2>
     <div class="big neu" id="heroVal">…</div>
     <div class="sub" id="heroSub"></div>
   </div>
@@ -99,8 +99,8 @@ footer .stale{color:var(--warn);font-weight:600}
   <div class="tiles">
     <div class="tile"><div class="lbl">Balance</div><div class="val" id="tBal">…</div><div class="hint" id="tBalH"></div></div>
     <div class="tile"><div class="lbl">Win rate</div><div class="val" id="tWr">…</div><div class="hint" id="tWrH"></div></div>
-    <div class="tile"><div class="lbl">PnL période</div><div class="val" id="tPnl">…</div><div class="hint" id="tPnlH"></div></div>
-    <div class="tile"><div class="lbl">Frais payés</div><div class="val" id="tFee">…</div><div class="hint" id="tFeeH"></div></div>
+    <div class="tile"><div class="lbl">Period PnL</div><div class="val" id="tPnl">…</div><div class="hint" id="tPnlH"></div></div>
+    <div class="tile"><div class="lbl">Fees paid</div><div class="val" id="tFee">…</div><div class="hint" id="tFeeH"></div></div>
   </div>
 
   <div class="filters">
@@ -108,32 +108,32 @@ footer .stale{color:var(--warn);font-weight:600}
       <button data-v="live">Live</button><button data-v="paper">Paper</button>
     </div>
     <div class="seg" id="segDays">
-      <button data-v="1">24h</button><button data-v="7">7j</button>
-      <button data-v="30">30j</button><button data-v="9999">Tout</button>
+      <button data-v="1">24h</button><button data-v="7">7d</button>
+      <button data-v="30">30d</button><button data-v="9999">All</button>
     </div>
   </div>
 
   <div class="card chart">
-    <h2>Équité cumulée <span>($, fenêtres scorées)</span></h2>
+    <h2>Cumulative equity <span>($, scored windows)</span></h2>
     <svg id="eqSvg"></svg><div class="tip" id="eqTip"></div>
   </div>
 
   <div class="card chart">
-    <h2>PnL par jour <span>($, jour UTC)</span></h2>
+    <h2>PnL per day <span>($, UTC day)</span></h2>
     <svg id="dailySvg"></svg><div class="tip" id="dailyTip"></div>
   </div>
 
   <div class="card">
-    <h2>Dernières fenêtres</h2>
+    <h2>Recent windows</h2>
     <div id="winTbl"></div>
   </div>
 
   <div class="card">
-    <h2>Derniers fills</h2>
+    <h2>Recent fills</h2>
     <div id="fillTbl"></div>
   </div>
 
-  <footer id="foot">chargement…</footer>
+  <footer id="foot">loading…</footer>
 </div>
 
 <script>
@@ -144,11 +144,11 @@ const state = {mode:"live", days:7, data:null};
 const money = (v, signed=true) =>
   (signed && v > 0 ? "+" : "") + (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2)) + "$";
 const cls = v => v > 0.005 ? "pos" : v < -0.005 ? "negv" : "neu";
-const hm = ts => new Date(ts*1000).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
+const hm = ts => new Date(ts*1000).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
 const dayLbl = d => { const [y,m,dd] = d.split("-"); return dd + "/" + m; };
 const utcDay = ts => new Date(ts*1000).toISOString().slice(0,10);
 const ago = s => s < 90 ? Math.round(s)+"s" : s < 5400 ? Math.round(s/60)+"min" :
-  s < 172800 ? (s/3600).toFixed(1).replace(".0","")+"h" : Math.round(s/86400)+"j";
+  s < 172800 ? (s/3600).toFixed(1).replace(".0","")+"h" : Math.round(s/86400)+"d";
 
 function filtered(){
   const d = state.data; if(!d) return [];
@@ -159,7 +159,7 @@ function filtered(){
 function renderStatus(){
   const s = state.data.service, live = s.mode === "live", up = s.active === "active";
   $("stDot").style.background = !up ? "var(--bad)" : live ? "var(--dot-good)" : "var(--s1)";
-  $("stTxt").textContent = !up ? "arrêté" : live ? "LIVE " + s.stake + "$" : "paper";
+  $("stTxt").textContent = !up ? "stopped" : live ? "LIVE " + s.stake + "$" : "paper";
   $("stUp").textContent = up && s.start_epoch ? "· " + ago(state.data.now - s.start_epoch) : "";
 }
 
@@ -168,12 +168,12 @@ function renderHero(){
   const rows = d.windows.filter(w => w.mode === state.mode && utcDay(w.scored_ts||0) === today);
   const pnl = rows.reduce((a,w) => a + (w.net_pnl||0), 0);
   const wins = rows.filter(w => w.side === w.winner).length;
-  $("heroLbl").innerHTML = "PnL aujourd'hui <span>(" + state.mode + " · jour UTC)</span>";
+  $("heroLbl").innerHTML = "PnL today <span>(" + state.mode + " · UTC day)</span>";
   $("heroVal").textContent = rows.length ? money(pnl) : "0.00$";
   $("heroVal").className = "big " + cls(pnl);
   $("heroSub").textContent = rows.length
-    ? rows.length + " fenêtre" + (rows.length>1?"s":"") + " · " + wins + "W/" + (rows.length-wins) + "L"
-    : "aucune fenêtre scorée aujourd'hui";
+    ? rows.length + " window" + (rows.length>1?"s":"") + " · " + wins + "W/" + (rows.length-wins) + "L"
+    : "no scored window today";
 }
 
 function renderTiles(){
@@ -181,17 +181,17 @@ function renderTiles(){
   const wins = rows.filter(w => w.side === w.winner).length;
   const pnl = rows.reduce((a,w) => a + (w.net_pnl||0), 0);
   const fees = rows.reduce((a,w) => a + (w.fee||0), 0);
-  const per = state.days >= 9999 ? "tout" : state.days === 1 ? "24h" : state.days + "j";
+  const per = state.days >= 9999 ? "all" : state.days === 1 ? "24h" : state.days + "d";
   if(s.collateral != null){
     const extra = d.windows.filter(w => w.mode === "live" && (w.scored_ts||0) > (s.collateral_ts||0))
                            .reduce((a,w) => a + (w.net_pnl||0), 0);
     $("tBal").textContent = "~" + (s.collateral + extra).toFixed(2) + "$";
-    $("tBalH").textContent = "vue exchange, maj il y a "
+    $("tBalH").textContent = "exchange view, updated "
       + (s.collateral_ts ? ago(d.now - s.collateral_ts) : "?")
-      + (extra ? " + scoré depuis" : "");
-  } else { $("tBal").textContent = "?"; $("tBalH").textContent = "visible en mode live"; }
+      + " ago" + (extra ? " + scored since" : "");
+  } else { $("tBal").textContent = "?"; $("tBalH").textContent = "shown in live mode"; }
   $("tWr").textContent = rows.length ? Math.round(100*wins/rows.length) + "%" : "…";
-  $("tWrH").textContent = rows.length ? wins + "W/" + (rows.length-wins) + "L · " + state.mode + " " + per : "aucune fenêtre";
+  $("tWrH").textContent = rows.length ? wins + "W/" + (rows.length-wins) + "L · " + state.mode + " " + per : "no windows";
   $("tPnl").textContent = money(pnl); $("tPnl").className = "val " + cls(pnl);
   $("tPnlH").textContent = state.mode + " · " + per;
   $("tFee").textContent = fees.toFixed(2) + "$";
@@ -219,7 +219,7 @@ function renderEquity(){
   svg.setAttribute("height", H);
   if(!rows.length){
     const e = el("text",{x:W/2,y:H/2,"text-anchor":"middle"});
-    e.textContent = "aucune fenêtre sur la période";
+    e.textContent = "no windows in this period";
     svg.appendChild(e); return; }
   let cum = 0; const pts = rows.map(w => ({t:w.scored_ts, v:(cum += w.net_pnl||0), w}));
   const t0 = pts[0].t, t1 = pts[pts.length-1].t || t0+1;
@@ -238,7 +238,7 @@ function renderEquity(){
   let lastLbl = null;
   for(let i=0;i<=nx;i++){ const tt = t0 + (t1-t0)*i/nx;
     const txt = (t1-t0 > 2*86400)
-      ? new Date(tt*1000).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"}) : hm(tt);
+      ? new Date(tt*1000).toLocaleDateString("en-GB",{day:"2-digit",month:"2-digit"}) : hm(tt);
     if(txt === lastLbl) continue;
     lastLbl = txt;
     const t = el("text",{x:X(tt),y:H-5,"text-anchor":i===0?"start":i===nx?"end":"middle"});
@@ -269,9 +269,9 @@ function renderEquity(){
     cross.setAttribute("visibility","visible");
     cdot.setAttribute("cx",X(best.t)); cdot.setAttribute("cy",Y(best.v));
     cdot.setAttribute("visibility","visible");
-    tip.innerHTML = new Date(best.t*1000).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"})
+    tip.innerHTML = new Date(best.t*1000).toLocaleDateString("en-GB",{day:"2-digit",month:"2-digit"})
       + " " + hm(best.t) + " · " + best.w.family.split("-")[0]
-      + " <b>" + money(best.w.net_pnl||0) + "</b> · cumul <b>" + money(best.v) + "</b>";
+      + " <b>" + money(best.w.net_pnl||0) + "</b> · cum <b>" + money(best.v) + "</b>";
     tip.style.display = "block";
     const card = svg.parentElement.getBoundingClientRect();
     const tx = Math.min(Math.max(ev.clientX - card.left - 60, 4), card.width - tip.offsetWidth - 4);
@@ -294,7 +294,7 @@ function renderDaily(){
     if(w.side === w.winner) by[d].w++; }
   const days = Object.keys(by).sort().slice(-31);
   if(!days.length){ const e = el("text",{x:W/2,y:H/2,"text-anchor":"middle"});
-    e.textContent = "aucune fenêtre sur la période"; svg.appendChild(e); return; }
+    e.textContent = "no windows in this period"; svg.appendChild(e); return; }
   let lo = Math.min(0,...days.map(d=>by[d].pnl)), hi = Math.max(0,...days.map(d=>by[d].pnl));
   const padV = Math.max((hi-lo)*0.15, 0.05); lo -= padV; hi += padV;
   const Y = v => PAD.t + (H-PAD.t-PAD.b)*(1-(v-lo)/(hi-lo));
@@ -319,7 +319,7 @@ function renderDaily(){
     }
     const hit = el("rect",{x:PAD.l+band*i,y:PAD.t,width:band,height:H-PAD.t-PAD.b,fill:"transparent"});
     const show = ev => {
-      tip.innerHTML = dayLbl(d) + " · " + by[d].n + " fen. · " + by[d].w + "W/"
+      tip.innerHTML = dayLbl(d) + " · " + by[d].n + " wnd · " + by[d].w + "W/"
         + (by[d].n-by[d].w) + "L <b>" + money(v) + "</b>";
       tip.style.display = "block";
       const card = svg.parentElement.getBoundingClientRect();
@@ -344,8 +344,8 @@ function renderDaily(){
 
 function renderTables(){
   const rows = filtered().slice(-14).reverse();
-  $("winTbl").innerHTML = !rows.length ? '<div class="empty">aucune fenêtre sur la période</div>' :
-    '<table><tr><th>Fenêtre</th><th>Côté</th><th class="num">Entrée</th><th class="num">Net</th></tr>'
+  $("winTbl").innerHTML = !rows.length ? '<div class="empty">no windows in this period</div>' :
+    '<table><tr><th>Window</th><th>Side</th><th class="num">Entry</th><th class="num">Net</th></tr>'
     + rows.map(w => {
       const won = w.side === w.winner, net = w.net_pnl||0;
       return '<tr><td>' + hm(w.window) + '<div class="fam">' + (w.family||"").split("-")[0]
@@ -355,8 +355,8 @@ function renderTables(){
     }).join("") + '</table>';
   const d = state.data, since = d.now - state.days*86400;
   const fills = d.fills.filter(f => f.mode === state.mode && (f.ts||0) >= since).slice(-10).reverse();
-  $("fillTbl").innerHTML = !fills.length ? '<div class="empty">aucun fill sur la période</div>' :
-    '<table><tr><th>Heure</th><th>Côté</th><th class="num">Prix</th><th class="num">Montant</th></tr>'
+  $("fillTbl").innerHTML = !fills.length ? '<div class="empty">no fills in this period</div>' :
+    '<table><tr><th>Time</th><th>Side</th><th class="num">Price</th><th class="num">Notional</th></tr>'
     + fills.map(f => '<tr><td>' + hm(f.ts) + '<div class="fam">' + (f.family||"").split("-")[0]
       + '</div></td><td>' + (f.side||"?") + '</td><td class="num">'
       + (f.price!=null?f.price.toFixed(3):"?") + '</td><td class="num">'
@@ -367,9 +367,9 @@ function renderFoot(ok){
   const d = state.data, s = d.service;
   let stale = "";
   if(s.active === "active" && s.last_log_ts && d.now - s.last_log_ts > 1500)
-    stale = ' · <span class="stale">journal muet depuis ' + ago(d.now - s.last_log_ts) + '</span>';
-  $("foot").innerHTML = "maj " + new Date().toLocaleTimeString("fr-FR")
-    + " · dernier log il y a " + (s.last_log_ts ? ago(d.now - s.last_log_ts) : "?") + stale;
+    stale = ' · <span class="stale">journal silent for ' + ago(d.now - s.last_log_ts) + '</span>';
+  $("foot").innerHTML = "updated " + new Date().toLocaleTimeString("en-GB")
+    + " · last log " + (s.last_log_ts ? ago(d.now - s.last_log_ts) + " ago" : "?") + stale;
   $("offline").style.display = ok ? "none" : "block";
 }
 
@@ -385,7 +385,7 @@ async function refresh(){
     const r = await fetch("/api/data", {cache:"no-store"});
     state.data = await r.json();
     renderAll(true);
-  }catch(e){ if(state.data) renderAll(false); else $("foot").textContent = "Pi injoignable"; }
+  }catch(e){ if(state.data) renderAll(false); else $("foot").textContent = "host unreachable"; }
   $("all").style.opacity = 1;
 }
 
