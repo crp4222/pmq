@@ -27,9 +27,10 @@ jobs:
           pkg=$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)
           init=$(grep -m1 '^__version__' src/pmq/__init__.py | cut -d'"' -f2)
           srv=$(python3 -c "import json; print(json.load(open('server.json'))['version'])")
+          srvpkg=$(python3 -c "import json; print(json.load(open('server.json'))['packages'][0]['version'])")
           tag="${GITHUB_REF_NAME#v}"
-          if [ "$pkg" != "$tag" ] || [ "$init" != "$tag" ] || [ "$srv" != "$tag" ]; then
-            echo "tag v$tag, pyproject $pkg, __init__ $init, server.json $srv: bump ALL FOUR before releasing"
+          if [ "$pkg" != "$tag" ] || [ "$init" != "$tag" ] || [ "$srv" != "$tag" ] || [ "$srvpkg" != "$tag" ]; then
+            echo "tag v$tag, pyproject $pkg, __init__ $init, server.json $srv/$srvpkg: bump ALL FOUR before releasing"
             exit 1
           fi
 
