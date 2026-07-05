@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0 (2026-07-05)
+
+* `pmq.stream.PriceStream`: standard-library client for the resolution
+  price feed (`ws-live-data.polymarket.com`): the Chainlink stream that
+  resolves the updown markets plus the Binance spot mirror. Short-poll
+  design (measured: the edge serves the sustained push only to browser
+  connections; the initial batch is fresh to 1.2-2.8s and is re-polled
+  about once per second), incremental RFC 6455 decoder, per-symbol dedup
+  and rings, `last()/age()/recent()/health()`, optional `on_tick`
+  callback. No new dependencies.
+
 ## 0.5.0 (2026-07-05)
 
 * Order attribution registries: several order-senders can now share one

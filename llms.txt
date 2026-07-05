@@ -62,3 +62,5 @@ bring your own strategy).
 - Execution: PolymarketExecutor(key, funder, signature_type, builder_code, order_log, foreign_order_logs), .buy_fak(token_id, price_cap, usd) -> Fill, .sell_fak(token_id, price_floor, shares) -> Fill, .limit_gtc(...), .collateral(), .require_collateral(min_usd), .cancel_market(condition_id), .trades_totals(condition_id, only_mine, claim_unknown), .reconcile(condition_id)
 - Fill: order_id, matched_shares, matched_usd, price, rejected, bool() is "did anything match"
 - Exceptions: OrderUncertain (outcome unknown: reconcile before trading again), IntrospectionMismatch (installed client drifted: refuse to trade)
+
+pmq.stream.PriceStream: stdlib client for the resolution price feed (Chainlink + Binance mirrors).

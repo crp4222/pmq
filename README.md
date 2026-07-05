@@ -230,6 +230,29 @@ if every sender on the wallet keeps a registry
 the registries through the same environment variables. Fully opt-in:
 without `POLY_ORDER_LOG` the behavior is unchanged.
 
+## Streaming the resolution prices
+
+The updown markets resolve on the Chainlink stream, and
+`wss://ws-live-data.polymarket.com` republishes that exact stream (plus a
+Binance spot mirror). `pmq.stream.PriceStream` consumes it with the
+standard library only:
+
+```python
+from pmq.stream import PriceStream
+
+ps = PriceStream(assets=("btc", "eth")).start()
+ps.last("btc")               # (unix_seconds, value) from the Chainlink feed
+ps.age("btc")                # seconds since the freshest tick
+ps.last("btc", "binance")    # the spot mirror, for comparison
+```
+
+Design note, measured 2026-07 from two unrelated egresses: the edge serves
+the sustained push only to browser connections; a plain client gets the
+initial tick batch after subscribing, then silence. `PriceStream` therefore
+re-polls short connections (about one per second); the freshest tick is
+typically 1.2 to 2.8 seconds old. Treat the feed as advisory and fail
+closed on `age()`: the exchange resolves with its own copy.
+
 ## The signature_type decoder table
 
 | `signature_type` | Wallet | When it is yours |
