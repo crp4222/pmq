@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.0 (2026-07-05)
+
+* Order attribution registries: several order-senders can now share one
+  wallet without corrupting each other's exchange-truth accounting.
+  Configure `order_log` (env `POLY_ORDER_LOG`) on each sender: every
+  posted order id is appended to that file, and `trades_totals()` then
+  counts only trades whose `taker_order_id` (taker role) or
+  `maker_orders[].order_id` slice (maker role) belongs to OUR registry.
+  List the other senders' registries in `foreign_order_logs`
+  (env `POLY_FOREIGN_ORDER_LOGS`, colon-separated): `reconcile()` claims
+  trades unknown to EVERY registry, so fills posted during an uncertainty
+  window are recovered by the bot that was uncertain and by nobody else.
+  Verified against real V2 trade records (both `taker_order_id` and slice
+  `order_id` are present and populated). Fully opt-in: without an
+  order_log configured, behavior is byte-identical to 0.4.10.
+
 ## 0.4.10 (2026-07-05)
 
 * Book-level validation in the data layer: `best_bid_ask` and

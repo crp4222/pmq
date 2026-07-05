@@ -599,3 +599,63 @@ def test_trades_totals_non_list_body_is_not_truth():
     re-buy, and never raise."""
     for body in ({"error": "nope"}, "FAIL", 7, True):
         assert make(FakeClient(trades=body)).trades_totals("0xc") is None
+
+
+def _attr_client(taker_id="0xT1", maker_id="0xM1"):
+    class C(FakeClient):
+        def get_trades(self, params=None, only_first_page=False, next_cursor=None):
+            return [
+                {"side": "BUY", "status": "CONFIRMED", "trader_side": "TAKER",
+                 "taker_order_id": taker_id, "size": "5.0", "price": "0.9"},
+                {"side": "BUY", "status": "CONFIRMED", "trader_side": "TAKER",
+                 "taker_order_id": "0xOTHER", "size": "7.0", "price": "0.8"},
+                {"side": "BUY", "status": "CONFIRMED", "trader_side": "MAKER",
+                 "size": "99", "price": "0.5",
+                 "maker_orders": [
+                     {"order_id": maker_id, "matched_amount": "3.0", "price": "0.6"},
+                     {"order_id": "0xTHEIRS", "matched_amount": "4.0", "price": "0.6"},
+                 ]},
+            ]
+    return C()
+
+
+def test_order_registry_filters_totals(tmp_path):
+    mine = tmp_path / "mine.ids"
+    theirs = tmp_path / "theirs.ids"
+    mine.write_text("0xT1\n0xM1\n")
+    theirs.write_text("0xOTHER\n0xTHEIRS\n")
+    ex = PolymarketExecutor(client=_attr_client(), builder_code=None,
+                            order_log=str(mine),
+                            foreign_order_logs=[str(theirs)])
+    sh, usd, fees = ex.trades_totals("0xc")
+    assert sh == 5.0 + 3.0 and abs(usd - (4.5 + 1.8)) < 1e-9
+    # legacy mode (no registry): everything counts, maker slices by funder
+    ex2 = make(FakeClient())
+    ex2.client = _attr_client()
+    sh2, usd2, _ = ex2.trades_totals("0xc")
+    assert sh2 == 5.0 + 7.0 + 3.0 + 4.0
+
+
+def test_claim_unknown_recovers_uncertain_orders(tmp_path):
+    mine = tmp_path / "mine.ids"
+    theirs = tmp_path / "theirs.ids"
+    mine.write_text("")                      # rien a nous dans le registre
+    theirs.write_text("0xOTHER\n0xTHEIRS\n") # l autre bot revendique les siens
+    ex = PolymarketExecutor(client=_attr_client(taker_id="0xUNKNOWN",
+                                                maker_id="0xUNKNOWN2"),
+                            builder_code=None, order_log=str(mine),
+                            foreign_order_logs=[str(theirs)])
+    assert ex.trades_totals("0xc")[0] == 0.0                 # strict: exclu
+    sh, _, _ = ex.trades_totals("0xc", claim_unknown=True)   # reconcile: reclame
+    assert sh == 5.0 + 3.0
+
+
+def test_posted_orders_land_in_registry(tmp_path, monkeypatch):
+    monkeypatch.delenv("POLY_ORDER_LOG", raising=False)
+    reg = tmp_path / "bot.ids"
+    fc = FakeClient(market_resp={"orderID": "0xNEW", "success": True,
+                                 "makingAmount": "4.9", "takingAmount": "5.1"})
+    ex = PolymarketExecutor(client=fc, builder_code=None, order_log=str(reg))
+    ex.buy_fak("tok", 0.97, 5.0)
+    assert "0xNEW" in reg.read_text()
+    assert "0xNEW" in ex._own_ids

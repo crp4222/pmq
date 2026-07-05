@@ -148,7 +148,9 @@ class PolymarketExecutor:
                  signature_type: int | None = None,
                  builder_code: str | None = _UNSET,
                  host: str = HOST, chain_id: int = CHAIN_ID,
-                 client: Any = None, derive_creds: bool = True) -> None:
+                 client: Any = None, derive_creds: bool = True,
+                 order_log: str | None = _UNSET,
+                 foreign_order_logs: list[str] | str | None = _UNSET) -> None:
         from py_clob_client_v2.clob_types import (
             AssetType,
             BalanceAllowanceParams,
@@ -169,6 +171,20 @@ class PolymarketExecutor:
         }
         self.PolyApiException: type[Exception] = PolyApiException
         _patch_market_taker_precision()
+
+        # Order-attribution registries: several order-senders can share one
+        # wallet, but get_trades is account-level; each sender keeps an
+        # append-only log of ITS order ids so totals can filter to only-mine.
+        self.order_log: str | None = (
+            order_log if order_log is not _UNSET
+            else os.environ.get("POLY_ORDER_LOG") or None)
+        raw_foreign = (foreign_order_logs if foreign_order_logs is not _UNSET
+                       else os.environ.get("POLY_FOREIGN_ORDER_LOGS", ""))
+        if isinstance(raw_foreign, str):
+            self.foreign_order_logs = [p for p in raw_foreign.split(":") if p]
+        else:
+            self.foreign_order_logs = list(raw_foreign or [])
+        self._own_ids: set[str] = self._load_ids(self.order_log)
 
         if builder_code is _UNSET:
             builder_code = os.environ.get("POLY_BUILDER_CODE", DEFAULT_BUILDER_CODE)
@@ -309,6 +325,7 @@ class PolymarketExecutor:
                 or making < 0 or taking < 0:
             making = taking = 0.0    # NaN/inf/negative amounts book nothing
         usd, shares = (making, taking) if side == "BUY" else (taking, making)
+        self._remember_order(str(resp["orderID"]))
         return Fill(order_id=str(resp["orderID"]), matched_shares=shares,
                     matched_usd=usd, raw=resp)
 
@@ -419,6 +436,36 @@ class PolymarketExecutor:
             return None
 
     @staticmethod
+    def _load_ids(path: str | None) -> set[str]:
+        """Order ids from an append-only registry file (one id per line)."""
+        if not path:
+            return set()
+        try:
+            with open(path) as f:
+                return {ln.strip() for ln in f if ln.strip()}
+        except OSError:
+            return set()
+
+    def _remember_order(self, order_id: str) -> None:
+        """Append a freshly posted order id to our registry (best effort:
+        a write failure must never block trading, it only degrades the
+        only-mine filter toward claiming via reconcile)."""
+        if not order_id or not self.order_log:
+            return
+        self._own_ids.add(order_id)
+        try:
+            with open(self.order_log, "a") as f:
+                f.write(order_id + "\n")
+        except OSError as e:
+            log.warning("order log append failed: %s", e)
+
+    def _foreign_ids(self) -> set[str]:
+        out: set[str] = set()
+        for p in self.foreign_order_logs:
+            out |= self._load_ids(p)
+        return out
+
+    @staticmethod
     def _size_price(rec: dict[str, Any], size_key: str = "size",
                     ) -> tuple[float, float] | None:
         """(size, price) of one trade record or maker slice; None when
@@ -433,14 +480,21 @@ class PolymarketExecutor:
             return None
         return s, p
 
-    def _maker_slice_totals(self, t: dict[str, Any]) -> tuple[float, float]:
+    def _maker_slice_totals(self, t: dict[str, Any],
+                            own: set[str] | None = None,
+                            foreign: set[str] | None = None,
+                            claim_unknown: bool = False) -> tuple[float, float]:
         """(shares, usd) WE filled in one MAKER-role trade record. The
         top-level size is the counterparty's aggregate; ours is the sum of
         the ``maker_orders`` slices matched by funder address (every slice
         when no funder is configured). Records without slices fall back to
-        the top-level size."""
+        the top-level size. With ``own`` set (order-attribution mode), a
+        slice counts only if its order_id is in OUR registry, or unknown to
+        every registry while ``claim_unknown`` (post-uncertainty recovery)."""
         mos = t.get("maker_orders")
         if not isinstance(mos, list) or not mos:
+            if own is not None and not claim_unknown:
+                return 0.0, 0.0            # unattributable without slices
             sp = self._size_price(t)
             return (sp[0], sp[1] * sp[0]) if sp is not None else (0.0, 0.0)
         me = (self.funder or "").lower()
@@ -450,6 +504,12 @@ class PolymarketExecutor:
                 continue
             if me and str(mo.get("maker_address", "")).lower() != me:
                 continue
+            if own is not None:
+                oid = str(mo.get("order_id") or "")
+                mine = oid in own or (claim_unknown and oid
+                                      and oid not in (foreign or set()))
+                if not mine:
+                    continue
             sp = self._size_price(mo, "matched_amount")
             if sp is not None:
                 sh += sp[0]
@@ -458,6 +518,8 @@ class PolymarketExecutor:
 
     def trades_totals(self, condition_id: str, token_id: str | None = None,
                       side: str = "BUY", fee_rate: float = FEE_RATES["crypto"],
+                      only_mine: bool | None = None,
+                      claim_unknown: bool = False,
                       ) -> tuple[float, float, float] | None:
         """Exchange truth for one market: (shares, usd, fee_estimate) actually
         traded on our account, or None if the API is unreachable. FAILED
@@ -467,7 +529,17 @@ class PolymarketExecutor:
         level (verified on a real settlement, 2026-07-04); our actual slice
         lives in ``maker_orders``, matched by funder address. Set
         POLY_FUNDER even for sig 0 accounts if you post resting orders,
-        otherwise all slices of bundled trades are attributed to you."""
+        otherwise all slices of bundled trades are attributed to you.
+
+        Order attribution: with several order-senders sharing the wallet,
+        configure ``order_log`` (POLY_ORDER_LOG) on each and list the others
+        in ``foreign_order_logs`` (POLY_FOREIGN_ORDER_LOGS, colon-separated).
+        ``only_mine`` (default: on iff an order_log is configured) then
+        counts only trades whose taker_order_id (or maker slice order_id)
+        is in OUR registry. ``claim_unknown`` additionally claims trades
+        unknown to EVERY registry: reconcile() sets it, so fills posted
+        during an uncertainty window are recovered by the bot that was
+        uncertain. Sound only if every sender on the account keeps a log."""
         try:
             trades = self.client.get_trades(
                 self._t["TradeParams"](market=condition_id, asset_id=token_id))
@@ -478,16 +550,27 @@ class PolymarketExecutor:
             # drifted body shape: refuse to claim truth rather than guess
             log.warning("get_trades(%s) returned a non-list body", condition_id)
             return None
+        if only_mine is None:
+            only_mine = self.order_log is not None
+        own = self._own_ids if only_mine else None
+        foreign = self._foreign_ids() if only_mine else None
         sh = usd = fees = 0.0
         for t in trades or []:
             if not isinstance(t, dict) or t.get("side") != side \
                     or t.get("status") == "FAILED":
                 continue
             if t.get("trader_side") == "MAKER":
-                dsh, dusd = self._maker_slice_totals(t)
+                dsh, dusd = self._maker_slice_totals(t, own, foreign,
+                                                     claim_unknown)
                 sh += dsh
                 usd += dusd
                 continue                       # maker fills pay zero fee
+            if own is not None:
+                tid = str(t.get("taker_order_id") or "")
+                mine = tid in own or (claim_unknown and tid
+                                      and tid not in (foreign or set()))
+                if not mine:
+                    continue
             sp = self._size_price(t)
             if sp is None:
                 continue
@@ -508,4 +591,6 @@ class PolymarketExecutor:
             log.warning("reconcile(%s): %d orders still open after cancel, retrying",
                         condition_id, len(still))
             self.cancel_market(condition_id)
-        return self.trades_totals(condition_id, token_id)
+        # claim_unknown: an order posted during the uncertainty window may
+        # have no registry entry; it belongs to the bot that was uncertain.
+        return self.trades_totals(condition_id, token_id, claim_unknown=True)
