@@ -171,3 +171,49 @@ def test_daily_budget_uncertain_consumes_requested(monkeypatch):
     for _ in range(3):
         assert "outcome unknown" in m2.fak_buy(token_id="t", price_cap=0.97,
                                                usd=9.0)["error"]
+
+
+def load_paper(monkeypatch, paper_usd=None, **kw):
+    monkeypatch.setenv("PMQ_MCP_PAPER", "1")
+    if paper_usd is not None:
+        monkeypatch.setenv("PMQ_MCP_PAPER_USD", str(paper_usd))
+    else:
+        monkeypatch.delenv("PMQ_MCP_PAPER_USD", raising=False)
+    return load_mcp(monkeypatch, **kw)
+
+
+BOOK = {"bids": [{"price": "0.55", "size": "40"}],
+        "asks": [{"price": "0.60", "size": "30"}],
+        "min_order_size": "5", "tick_size": "0.01"}
+
+
+def test_paper_mode_needs_no_keys_and_wins_over_live(monkeypatch):
+    m = load_paper(monkeypatch, live=True)          # both set: paper wins
+    assert m.PAPER_ENABLED and not m.LIVE_ENABLED
+    monkeypatch.setattr(m.data, "get_book", lambda t, logger=None: dict(BOOK))
+    out = m.fak_buy(token_id="111", price_cap=0.62, usd=6.0)
+    assert out["booked"] and out["paper"] and out["price"] == 0.60
+    assert m._executor is None                       # no executor ever built
+
+
+def test_paper_fills_at_real_ask_and_respects_min_and_cap(monkeypatch):
+    m = load_paper(monkeypatch)
+    monkeypatch.setattr(m.data, "get_book", lambda t, logger=None: dict(BOOK))
+    assert m.fak_buy(token_id="1", price_cap=0.55, usd=6.0)["rejected"]
+    out = m.fak_buy(token_id="1", price_cap=0.62, usd=2.0)   # 3.33sh < min 5
+    assert out["rejected"] and "minimum" in out["error"]
+    ok = m.fak_buy(token_id="1", price_cap=0.62, usd=6.0)
+    assert ok["booked"] and abs(ok["matched_shares"] - 10.0) < 0.01
+    assert ok["cash_left"] < 1000 - 5.99
+
+
+def test_paper_sell_needs_position_and_updates_cash(monkeypatch):
+    m = load_paper(monkeypatch, paper_usd=100)
+    monkeypatch.setattr(m.data, "get_book", lambda t, logger=None: dict(BOOK))
+    assert m.fak_sell(token_id="1", price_floor=0.5, shares=5.0)["rejected"]
+    m.fak_buy(token_id="1", price_cap=0.62, usd=6.0)
+    out = m.fak_sell(token_id="1", price_floor=0.5, shares=10.0)
+    assert out["booked"] and out["price"] == 0.55
+    assert m.account_collateral()["paper"]
+    tot = m.account_trades(condition_id="0xc", token_id="1")
+    assert tot["paper"] and abs(tot["shares"]) < 0.01   # flat after round trip

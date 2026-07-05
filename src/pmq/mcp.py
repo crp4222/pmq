@@ -30,7 +30,11 @@ except ImportError as e:  # pragma: no cover
     raise SystemExit("pmq-mcp needs the optional dependency: pip install 'pmq[mcp]'") from e
 
 LIVE_ENABLED = os.environ.get("PMQ_MCP_LIVE") == "1"
+PAPER_ENABLED = os.environ.get("PMQ_MCP_PAPER") == "1"
+if PAPER_ENABLED:
+    LIVE_ENABLED = False          # explicit paper always wins over live
 MAX_USD = float(os.environ.get("PMQ_MCP_MAX_USD", "10"))
+PAPER_START_USD = float(os.environ.get("PMQ_MCP_PAPER_USD", "1000"))
 MAX_DAILY_USD = float(os.environ.get("PMQ_MCP_DAILY_USD", "0"))
 _budget_day = [""]
 _budget_spent = [0.0]
@@ -57,12 +61,17 @@ mcp = FastMCP(
     instructions=(
         "Polymarket CLOB V2 data and fail-closed execution. Books are real "
         "time; the trade tape lags 1 to 3 minutes, never trade off it. "
-        + ("Trading tools are ENABLED; every order is capped at "
+        + ("PAPER trading tools are enabled: fills are SIMULATED against "
+           "the real live order books (real asks, real exchange minimums, "
+           "real fees); no keys are involved and no order ever reaches the "
+           f"exchange. Starting balance {PAPER_START_USD:.2f} USD."
+           if PAPER_ENABLED else
+           "Trading tools are ENABLED; every order is capped at "
            f"{MAX_USD:.2f} USD per call"
            + (f" and buys at {MAX_DAILY_USD:.2f} USD per UTC day."
               if MAX_DAILY_USD > 0 else ".") if LIVE_ENABLED else
-           "Trading tools are DISABLED (operator did not set PMQ_MCP_LIVE=1); "
-           "this server is read-only.")),
+           "Trading tools are DISABLED (operator did not set PMQ_MCP_LIVE=1 "
+           "or PMQ_MCP_PAPER=1); this server is read-only.")),
 )
 
 _executor: PolymarketExecutor | None = None
@@ -165,11 +174,23 @@ def taker_fee(price: float, shares: float, category: str = "crypto") -> dict[str
             "cost_per_share_incl_fee": price + data.fee(price, 1.0, rate)}
 
 
+_paper: dict[str, Any] = {"cash": PAPER_START_USD, "positions": {}, "fills": []}
+
+
+def _paper_reset() -> None:
+    _paper["cash"] = PAPER_START_USD
+    _paper["positions"] = {}
+    _paper["fills"] = []
+
+
 @mcp.tool()
 def account_collateral() -> dict[str, Any]:
     """Collateral (pUSD, $) the CLOB sees for the configured account. If this
     is 0 while funds are on-chain, the operator's POLY_SIG_TYPE is wrong
-    (the Polymarket app's deposit wallet needs 3)."""
+    (the Polymarket app's deposit wallet needs 3). In paper mode: the
+    simulated cash balance."""
+    if PAPER_ENABLED:
+        return {"collateral_usd": round(_paper["cash"], 2), "paper": True}
     return {"collateral_usd": _ex().collateral()}
 
 
@@ -178,6 +199,14 @@ def account_trades(condition_id: str, token_id: str = "") -> dict[str, Any]:
     """Exchange-truth totals of OUR account's BUY trades on one market:
     (shares, usd, fee estimate). This is the reconciliation source, use it
     after any uncertainty instead of trusting local bookkeeping."""
+    if PAPER_ENABLED:
+        fills = [f for f in _paper["fills"]
+                 if not token_id or f["token_id"] == token_id]
+        return {"shares": round(sum(f["shares"] for f in fills if f["side"] == "BUY")
+                                - sum(f["shares"] for f in fills if f["side"] == "SELL"), 4),
+                "usd": round(sum(f["usd"] for f in fills if f["side"] == "BUY"), 4),
+                "fee_estimate": round(sum(f["fee"] for f in fills), 4),
+                "paper": True}
     totals = _ex().trades_totals(condition_id, token_id or None)
     if totals is None:
         return {"error": "trades endpoint unreachable"}
@@ -185,7 +214,60 @@ def account_trades(condition_id: str, token_id: str = "") -> dict[str, Any]:
     return {"shares": sh, "usd": usd, "fee_estimate": fees}
 
 
-if LIVE_ENABLED:
+def _paper_buy(token_id: str, price_cap: float, usd: float) -> dict[str, Any]:
+    """Simulated FAK buy against the REAL book: fills at the real best ask
+    (never at the wished cap), capped by displayed size, refused under the
+    per-market exchange minimum, real fee formula. Same shape as live."""
+    book = data.get_book(token_id)
+    if not book:
+        return {"error": "book unavailable"}
+    _, _, ask, ask_sz = data.best_bid_ask(book)
+    if ask is None or ask > price_cap:
+        return {"booked": False, "rejected": True, "paper": True,
+                "error": f"no ask at or under {price_cap} (best ask: {ask})"}
+    min_sh = data.book_meta(book)["min_order_size"] or 0.0
+    usd_eff = min(usd, ask * (ask_sz or 0.0), _paper["cash"])
+    shares = round(usd_eff / ask, 4)
+    if shares < (min_sh or 0):
+        return {"booked": False, "rejected": True, "paper": True,
+                "error": f"{shares} shares under the exchange minimum {min_sh}"}
+    fee_usd = data.fee(ask, shares)
+    _paper["cash"] -= ask * shares + fee_usd
+    _paper["positions"][token_id] = _paper["positions"].get(token_id, 0.0) + shares
+    fill = {"token_id": token_id, "side": "BUY", "price": ask,
+            "shares": shares, "usd": round(ask * shares, 4),
+            "fee": round(fee_usd, 4)}
+    _paper["fills"].append(fill)
+    return {"booked": True, "paper": True, "matched_shares": shares,
+            "matched_usd": fill["usd"], "price": ask, "fee_usd": fill["fee"],
+            "cash_left": round(_paper["cash"], 2)}
+
+
+def _paper_sell(token_id: str, price_floor: float, shares: float) -> dict[str, Any]:
+    held = _paper["positions"].get(token_id, 0.0)
+    if shares > held + 1e-9:
+        return {"booked": False, "rejected": True, "paper": True,
+                "error": f"position is {held} shares, cannot sell {shares}"}
+    book = data.get_book(token_id)
+    if not book:
+        return {"error": "book unavailable"}
+    bid, bid_sz, _, _ = data.best_bid_ask(book)
+    if bid is None or bid < price_floor:
+        return {"booked": False, "rejected": True, "paper": True,
+                "error": f"no bid at or above {price_floor} (best bid: {bid})"}
+    sh = round(min(shares, bid_sz or shares), 4)
+    fee_usd = data.fee(bid, sh)
+    _paper["cash"] += bid * sh - fee_usd
+    _paper["positions"][token_id] = held - sh
+    fill = {"token_id": token_id, "side": "SELL", "price": bid, "shares": sh,
+            "usd": round(bid * sh, 4), "fee": round(fee_usd, 4)}
+    _paper["fills"].append(fill)
+    return {"booked": True, "paper": True, "matched_shares": sh,
+            "matched_usd": fill["usd"], "price": bid, "fee_usd": fill["fee"],
+            "cash_left": round(_paper["cash"], 2)}
+
+
+if LIVE_ENABLED or PAPER_ENABLED:
     @mcp.tool()
     def fak_buy(token_id: str, price_cap: float, usd: float) -> dict[str, Any]:
         """Place a fill-and-kill market BUY: spend up to `usd` at prices no
@@ -202,6 +284,11 @@ if LIVE_ENABLED:
             return {"error": f"refused: daily buy budget "
                              f"({MAX_DAILY_USD:.2f} USD) leaves only "
                              f"{max(left, 0.0):.2f} USD today"}
+        if PAPER_ENABLED:
+            out = _paper_buy(token_id, price_cap, usd)
+            if out.get("booked"):
+                _budget_consume(float(out.get("matched_usd") or 0.0))
+            return out
         try:
             fill = _ex().buy_fak(token_id, price_cap, usd)
         except OrderUncertain as e:
@@ -216,6 +303,8 @@ if LIVE_ENABLED:
     def fak_sell(token_id: str, price_floor: float, shares: float) -> dict[str, Any]:
         """Fill-and-kill market SELL of `shares` at prices no worse than
         `price_floor`. Same confirmation contract as fak_buy."""
+        if PAPER_ENABLED:
+            return _paper_sell(token_id, price_floor, shares)
         try:
             return _fill_dict(_ex().sell_fak(token_id, price_floor, shares))
         except OrderUncertain as e:
@@ -227,6 +316,9 @@ if LIVE_ENABLED:
         """Cancel every resting order of ours on one market, verify none
         stayed open, and return exchange-truth totals. Call this after any
         'outcome unknown' before placing new orders on that market."""
+        if PAPER_ENABLED:
+            return {"cancelled": True, "paper": True,
+                    "note": "paper mode: FAK only, nothing ever rests"}
         totals = _ex().reconcile(condition_id, token_id or None)
         if totals is None:
             return {"cancelled": True, "error": "trades endpoint unreachable"}
