@@ -12,10 +12,12 @@ class FakeClient:
     """Signature-compatible stand-in for ClobClient (introspection must pass)."""
 
     def __init__(self, market_resp=None, market_exc=None, trades=None,
-                 balance=None, open_orders=None):
+                 balance=None, open_orders=None, cancel_resp=None,
+                 order_resp=None):
         self.market_resp, self.market_exc = market_resp, market_exc
         self.trades, self.balance = trades, balance
         self.open = open_orders or []
+        self.cancel_resp, self.order_resp = cancel_resp, order_resp
         self.calls = []
 
     def create_and_post_market_order(self, order_args, options=None,
@@ -37,11 +39,17 @@ class FakeClient:
 
     def cancel_orders(self, order_hashes):
         self.calls.append(("cancel_orders", order_hashes))
+        return self.cancel_resp
+
+    def get_order(self, order_id):
+        self.calls.append(("get_order", order_id))
+        return self.order_resp
 
     def get_open_orders(self, params=None, only_first_page=False, next_cursor=None):
         return self.open
 
     def get_trades(self, params=None, only_first_page=False, next_cursor=None):
+        self.calls.append(("get_trades", params))
         return self.trades
 
     def get_balance_allowance(self, params=None):
@@ -380,6 +388,11 @@ def test_introspection_guard_covers_every_member_the_executor_calls():
     with pytest.raises(IntrospectionMismatch, match="get_clob_market_info"):
         make(NoMarketInfo())
 
+    class NoGetOrder(FakeClient):
+        get_order = None
+    with pytest.raises(IntrospectionMismatch, match="method get_order missing"):
+        make(NoGetOrder())
+
 
 def test_reconcile_cancels_then_reports_truth():
     fc = FakeClient(trades=[{"side": "BUY", "size": "2", "price": "0.95"}],
@@ -404,15 +417,42 @@ def test_fee_rate_authoritative_with_fallback():
     assert make(FakeClient()).fee_rate("0xc") == 0.07  # fallback: endpoint fails
 
 
-def test_cancel_order_single():
-    fc = FakeClient()
-    assert make(fc).cancel_order("0xdead") is True
-    assert ("cancel_orders", ["0xdead"]) in fc.calls
+def test_cancel_order_true_only_on_confirmed_cancel():
+    """The CLOB can decline a cancel INSIDE an HTTP 200 while the order is
+    mid match (measured live 2026-07-06: a blindly trusted 200 freed
+    budget while the order was still resting). True requires the order id
+    under ``canceled``; not_canceled and any unexpected body read as NOT
+    canceled."""
+    ok = FakeClient(cancel_resp={"canceled": ["0xdead"], "not_canceled": None})
+    assert make(ok).cancel_order("0xdead") is True
+    assert ("cancel_orders", ["0xdead"]) in ok.calls
+
+    declined = FakeClient(cancel_resp={
+        "canceled": [], "not_canceled": {"0xdead": "order is being matched"}})
+    assert make(declined).cancel_order("0xdead") is False
+
+
+def test_cancel_order_fails_closed_on_unexpected_bodies_and_errors():
+    for body in (None, "OK", 200, [], {}, {"canceled": ["0xother"]},
+                 {"canceled": "0xdead"}, {"not_canceled": ["0xdead"]}):
+        assert make(FakeClient(cancel_resp=body)).cancel_order("0xdead") is False
 
     class CancelBoom(FakeClient):
         def cancel_orders(self, order_hashes):
             raise RuntimeError("down")
     assert make(CancelBoom()).cancel_order("0xdead") is False
+
+
+def test_get_order_returns_dict_or_none():
+    rec = {"id": "0xdead", "status": "MATCHED", "size_matched": "4.2"}
+    ex = make(FakeClient(order_resp=rec))
+    assert ex.get_order("0xdead") == rec
+    assert make(FakeClient(order_resp="OK")).get_order("0xdead") is None
+
+    class OrderBoom(FakeClient):
+        def get_order(self, order_id):
+            raise RuntimeError("down")
+    assert make(OrderBoom()).get_order("0xdead") is None
 
 
 def test_private_key_never_appears_in_logs(monkeypatch, caplog):
@@ -659,3 +699,226 @@ def test_posted_orders_land_in_registry(tmp_path, monkeypatch):
     ex.buy_fak("tok", 0.97, 5.0)
     assert "0xNEW" in reg.read_text()
     assert "0xNEW" in ex._own_ids
+
+
+# ---- 0.6.1: maker fills under the counterparty's top-level side/asset ----
+# A MAKER-role record reports the TAKER at top level. Measured live
+# 2026-07-06: 6 CONFIRMED maker fills (16.97 shares, 16.19 USD) were
+# invisible to trades_totals because their records carried the taker's
+# SELL (or the complementary asset) at top level.
+
+ME = "0x76cD962FC8C5f5E5a0CBE14C74339AA78268dA58"
+UP = "111"
+DOWN = "222"
+
+
+def _mslice(amount, price, side=None, asset=None, oid="0xM1", addr=ME):
+    mo = {"order_id": oid, "maker_address": addr,
+          "matched_amount": amount, "price": price}
+    if side is not None:
+        mo["side"] = side
+    if asset is not None:
+        mo["asset_id"] = asset
+        mo["outcome"] = "Up" if asset == UP else "Down"
+    return mo
+
+
+def _mrec(taker_side, taker_asset=None, slices=None):
+    rec = {"side": taker_side, "size": "40", "price": "0.5",
+           "trader_side": "MAKER", "status": "CONFIRMED"}
+    if taker_asset is not None:
+        rec["asset_id"] = taker_asset
+        rec["outcome"] = "Up" if taker_asset == UP else "Down"
+    if slices is not None:
+        rec["maker_orders"] = slices
+    return rec
+
+
+def test_trades_totals_counts_maker_buy_under_taker_sell_record(monkeypatch):
+    """THE 2026-07-06 bug: our BUY bid lifted by a selling taker lives in
+    a record whose top-level side is SELL. It books from the slice."""
+    monkeypatch.setenv("POLY_FUNDER", ME)
+    rec = _mrec("SELL", UP, [_mslice("16.97", "0.954", side="BUY", asset=UP)])
+    sh, usd, fees = make(FakeClient(trades=[rec])).trades_totals("0xc", UP)
+    assert abs(sh - 16.97) < 1e-9 and abs(usd - 16.97 * 0.954) < 1e-9
+    assert fees == 0.0
+
+
+def test_trades_totals_counts_maker_fill_under_complementary_record(monkeypatch):
+    """Mint match: the taker bought the OTHER outcome, so even the record
+    asset is not ours. The slice carries our token and side and books."""
+    monkeypatch.setenv("POLY_FUNDER", ME)
+    rec = _mrec("BUY", DOWN, [_mslice("5", "0.39", side="BUY", asset=UP)])
+    sh, usd, fees = make(FakeClient(trades=[rec])).trades_totals("0xc", UP)
+    assert sh == 5.0 and abs(usd - 1.95) < 1e-9 and fees == 0.0
+
+
+def test_trades_totals_queries_by_condition_alone():
+    """The venue-side asset filter is gone (it can hide maker fills whose
+    record carries the complementary token): side and token now apply
+    in-process."""
+    fc = FakeClient(trades=[])
+    make(fc).trades_totals("0xc", UP)
+    params = [c[1] for c in fc.calls if c[0] == "get_trades"][0]
+    assert params.market == "0xc" and params.asset_id is None
+
+
+def test_trades_totals_requested_side_selects_maker_slices(monkeypatch):
+    """side='BUY' books only our BUY slices and side='SELL' only our SELL
+    slices, whatever the records' top-level sides say."""
+    monkeypatch.setenv("POLY_FUNDER", ME)
+    rows = [_mrec("SELL", UP, [_mslice("3", "0.5", side="BUY", asset=UP)]),
+            _mrec("BUY", UP, [_mslice("7", "0.6", side="SELL", asset=UP)])]
+    ex = make(FakeClient(trades=rows))
+    b = ex.trades_totals("0xc", UP, side="BUY")
+    s = ex.trades_totals("0xc", UP, side="SELL")
+    assert b[0] == 3.0 and abs(b[1] - 1.5) < 1e-9
+    assert s[0] == 7.0 and abs(s[1] - 4.2) < 1e-9
+
+
+def test_trades_totals_token_filter_applies_per_slice(monkeypatch):
+    """One trade can mix same-asset makers (opposite side of the taker)
+    and complementary-asset makers (same side, mint): every slice books
+    to its OWN token, never to the record's top-level asset."""
+    monkeypatch.setenv("POLY_FUNDER", ME)
+    rec = _mrec("BUY", UP, [_mslice("4", "0.55", side="SELL", asset=UP),
+                            _mslice("6", "0.44", side="BUY", asset=DOWN,
+                                    oid="0xM2")])
+    ex = make(FakeClient(trades=[rec]))
+    assert ex.trades_totals("0xc", UP, side="SELL")[0] == 4.0
+    assert ex.trades_totals("0xc", DOWN, side="BUY")[0] == 6.0
+    assert ex.trades_totals("0xc", UP, side="BUY")[0] == 0.0
+    assert ex.trades_totals("0xc", DOWN, side="SELL")[0] == 0.0
+
+
+def test_trades_totals_derives_slice_side_when_absent(monkeypatch):
+    """Slices without a side field: the same asset as the taker means we
+    faced it (opposite side), the complementary asset means the same
+    side. Outcome labels carry the same information when asset ids are
+    missing too."""
+    monkeypatch.setenv("POLY_FUNDER", ME)
+    faced = _mrec("SELL", UP, [_mslice("3", "0.5", asset=UP)])
+    minted = _mrec("BUY", DOWN, [_mslice("5", "0.39", asset=UP)])
+    ex = make(FakeClient(trades=[faced, minted]))
+    sh, usd, _ = ex.trades_totals("0xc", UP)
+    assert sh == 8.0 and abs(usd - (1.5 + 1.95)) < 1e-9
+    assert ex.trades_totals("0xc", UP, side="SELL")[0] == 0.0
+
+    by_outcome = {"side": "SELL", "size": "9", "price": "0.5",
+                  "outcome": "Up", "trader_side": "MAKER",
+                  "maker_orders": [{"order_id": "0x1", "maker_address": ME,
+                                    "matched_amount": "2", "price": "0.5",
+                                    "outcome": "Up"}]}
+    assert make(FakeClient(trades=[by_outcome])).trades_totals("0xc")[0] == 2.0
+
+
+def test_trades_totals_sliceless_maker_record_keeps_record_side(monkeypatch):
+    """No slices and no per-slice information: our side is unknowable, so
+    the record side keeps standing for it (trimmed archival records; real
+    MAKER records always carry maker_orders). Documented limit."""
+    monkeypatch.delenv("POLY_FUNDER", raising=False)
+    rec = {"side": "SELL", "size": "3", "price": "0.5", "trader_side": "MAKER"}
+    assert make(FakeClient(trades=[rec])).trades_totals("0xc")[0] == 0.0
+    assert make(FakeClient(trades=[rec])).trades_totals(
+        "0xc", side="SELL")[0] == 3.0
+
+
+def test_trades_totals_only_mine_gates_recovered_maker_records(tmp_path,
+                                                               monkeypatch):
+    """The records the old side pre-filter skipped now flow through the
+    registry gate like any other: a slice outside OUR registry books
+    nothing (the attribution invariant does not weaken with the fix)."""
+    monkeypatch.delenv("POLY_FUNDER", raising=False)
+    mine = tmp_path / "mine.ids"
+    mine.write_text("0xMINE\n")
+    rec = _mrec("SELL", UP,
+                [_mslice("3", "0.5", side="BUY", asset=UP, oid="0xMINE"),
+                 _mslice("9", "0.5", side="BUY", asset=UP, oid="0xFOREIGN")])
+    ex = PolymarketExecutor(client=FakeClient(trades=[rec]),
+                            builder_code=None, order_log=str(mine))
+    sh, usd, _ = ex.trades_totals("0xc", UP)
+    assert sh == 3.0 and abs(usd - 1.5) < 1e-9
+
+
+def test_trades_totals_taker_path_locked(monkeypatch):
+    """favbot and chainlive score real money through the taker path: the
+    maker fix must not move it. Side selection, FAILED exclusion and the
+    fee estimate behave exactly as 0.6.0."""
+    monkeypatch.delenv("POLY_FUNDER", raising=False)
+    rows = [
+        {"side": "BUY", "size": "5", "price": "0.9", "trader_side": "TAKER",
+         "asset_id": UP, "status": "CONFIRMED"},
+        {"side": "SELL", "size": "9", "price": "0.5", "trader_side": "TAKER",
+         "asset_id": UP, "status": "CONFIRMED"},
+        {"side": "BUY", "size": "7", "price": "0.8", "trader_side": "TAKER",
+         "asset_id": UP, "status": "FAILED"},
+    ]
+    sh, usd, fees = make(FakeClient(trades=rows)).trades_totals("0xc", UP)
+    assert (sh, usd) == (5.0, 4.5)
+    assert abs(fees - 0.07 * 0.9 * 0.1 * 5) < 1e-9
+
+
+def test_trades_totals_taker_token_filter_in_process(monkeypatch):
+    """token_id now filters taker records in-process on their top-level
+    asset (the field the venue filtered on): the other token of the
+    market is excluded, records without an asset keep counting."""
+    monkeypatch.delenv("POLY_FUNDER", raising=False)
+    rows = [
+        {"side": "BUY", "size": "5", "price": "0.9", "trader_side": "TAKER",
+         "asset_id": UP},
+        {"side": "BUY", "size": "7", "price": "0.8", "trader_side": "TAKER",
+         "asset_id": DOWN},
+        {"side": "BUY", "size": "2", "price": "0.5", "trader_side": "TAKER"},
+    ]
+    ex = make(FakeClient(trades=rows))
+    assert ex.trades_totals("0xc", UP)[0] == 7.0
+    assert ex.trades_totals("0xc")[0] == 14.0
+
+
+MAKER_RECORD_FULL = {
+    # The MAKER_RECORD settlement in the COMPLETE shape get_trades returns
+    # (captured 2026-07-04; owner/counterparty ids scrubbed): the top
+    # level is the TAKER, a BUY of the opposite outcome minted against
+    # us, and our fill is the funder-matched slice, itself side BUY with
+    # its own asset_id. Note the slices' empty fee_rate_bps strings.
+    "id": "8489e058-a38e-431d-8d7d-c74103c4a689",
+    "taker_order_id": "0xtaker",
+    "market": "0x7c2d64edce3705436bfb026276fc0454d97f55ea2d336931537caf90d5c01d59",
+    "asset_id": "13462038953389429583043236757434556877510677005296"
+                "543188461193393177949107848",
+    "side": "BUY", "size": "26.461537", "fee_rate_bps": "0",
+    "price": "0.64", "status": "CONFIRMED",
+    "match_time": "1783168449", "last_update": "1783168459",
+    "outcome": "EDward Gaming", "bucket_index": 0, "owner": "scrubbed",
+    "maker_address": "0xa50A47f0443E7Af89f18cAAc78BB7eF388b54E2e",
+    "transaction_hash": "0x1b60f19a6f089624f27babb58bf82538c49f044ee83778"
+                        "783195e26a33c35d09",
+    "maker_orders": [
+        {"order_id": "0x35fb607f67ef", "owner": "scrubbed",
+         "maker_address": "0x76cD962FC8c5f5E5A0CBE14c74339aA78268da58",
+         "matched_amount": "5", "price": "0.39", "fee_rate_bps": "",
+         "asset_id": "24190104720077035941619094576418214448508678280027"
+                     "219867188476329765265887856",
+         "outcome": "Rex Regum Qeon", "side": "BUY"},
+        {"order_id": "0x868caa9688b9", "owner": "scrubbed",
+         "maker_address": "0x51DBDd2b190a49c1D6fA6df84c1F4A079bC1De76",
+         "matched_amount": "21.461537", "price": "0.3500000023297493",
+         "fee_rate_bps": "",
+         "asset_id": "24190104720077035941619094576418214448508678280027"
+                     "219867188476329765265887856",
+         "outcome": "Rex Regum Qeon", "side": "BUY"}],
+    "trader_side": "MAKER"}
+
+
+def test_trades_totals_real_full_record(monkeypatch):
+    """Full-fidelity real record: requested BUY on our token books our
+    slice; requested SELL books nothing; the taker's token books nothing
+    of ours."""
+    monkeypatch.setenv("POLY_FUNDER", ME)
+    tok = MAKER_RECORD_FULL["maker_orders"][0]["asset_id"]
+    other = MAKER_RECORD_FULL["asset_id"]
+    ex = make(FakeClient(trades=[MAKER_RECORD_FULL]))
+    sh, usd, fees = ex.trades_totals("0xc", tok)
+    assert sh == 5.0 and abs(usd - 1.95) < 1e-9 and fees == 0.0
+    assert ex.trades_totals("0xc", tok, side="SELL")[0] == 0.0
+    assert ex.trades_totals("0xc", other)[0] == 0.0

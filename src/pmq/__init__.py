@@ -25,7 +25,7 @@ from .data import (
 )
 from .exceptions import IntrospectionMismatch, OrderUncertain, PmqError
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 __all__ = [
     "FEE_RATES", "band_ask_depth_usd", "best_bid_ask", "book_inferred_winner",
     "book_meta", "event_markets", "fee", "get_book", "get_market", "get_tape",

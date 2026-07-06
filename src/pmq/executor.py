@@ -119,6 +119,7 @@ _EXPECTED_METHODS: dict[str, tuple[str, ...]] = {
     "create_and_post_order": ("order_args", "order_type", "post_only"),
     "cancel_market_orders": ("payload",),
     "cancel_orders": ("order_hashes",),
+    "get_order": ("order_id",),
     "get_open_orders": ("params",),
     "get_trades": ("params",),
     "get_balance_allowance": ("params",),
@@ -409,13 +410,38 @@ class PolymarketExecutor:
             return FEE_RATES["crypto"]
 
     def cancel_order(self, order_id: str) -> bool:
-        """Cancel one resting order by id. Never raises."""
+        """Cancel one resting order by id. Never raises. True ONLY when the
+        exchange confirms the cancel: the CLOB can decline a cancel INSIDE an
+        HTTP 200 (order mid-match), reporting it under ``not_canceled``;
+        trusting the 200 frees budget while the order is still alive
+        (measured on a live maker, 2026-07-06). An unrecognized body shape
+        counts as NOT canceled (fail closed): verify via open_orders."""
         try:
-            self.client.cancel_orders([order_id])
-            return True
+            resp = self.client.cancel_orders([order_id])
         except Exception as e:
             log.warning("cancel_order(%s) failed: %s", order_id, e)
             return False
+        if not isinstance(resp, dict):
+            return False
+        canceled = resp.get("canceled")
+        if isinstance(canceled, list) and order_id in canceled:
+            return True
+        not_canceled = resp.get("not_canceled")
+        if isinstance(not_canceled, dict) and order_id in not_canceled:
+            log.warning("cancel_order(%s) declined: %s", order_id,
+                        str(not_canceled.get(order_id))[:120])
+        return False
+
+    def get_order(self, order_id: str) -> dict[str, Any] | None:
+        """One order by id (status, size_matched, ...), or None on error.
+        The immediate truth for harvesting partial fills of an order that
+        just left the book."""
+        try:
+            out = self.client.get_order(order_id)
+            return out if isinstance(out, dict) else None
+        except Exception as e:
+            log.warning("get_order(%s) failed: %s", order_id, e)
+            return None
 
     def cancel_market(self, condition_id: str) -> bool:
         """Cancel every resting order of ours on one market. Never raises."""
@@ -480,36 +506,102 @@ class PolymarketExecutor:
             return None
         return s, p
 
-    def _maker_slice_totals(self, t: dict[str, Any],
+    @staticmethod
+    def _asset_ok(asset: Any, token_id: str | None) -> bool:
+        """Whether a record or slice may count toward ``token_id``: no
+        filter without a requested token, match on the asset when the
+        record carries one, count when it carries none (trimmed archival
+        records; real CLOB records always carry the asset)."""
+        return token_id is None or not asset or str(asset) == token_id
+
+    @staticmethod
+    def _slice_side(t: dict[str, Any], mo: dict[str, Any]) -> str:
+        """OUR side for one maker slice. A MAKER-role record carries the
+        TAKER's side/asset/outcome at top level (measured 2026-07-06: our
+        BUY bids lifted by a selling taker live in top-level SELL
+        records). Real slices carry their own ``side``; for records
+        without it, the same asset or outcome as the taker means we faced
+        it (opposite side) while the complementary token (mint or merge
+        match) means the same side. With no per-slice information at all
+        the record side stands, the pre-0.6.1 reading kept for trimmed
+        archival records."""
+        s = str(mo.get("side") or "").upper()
+        if s in ("BUY", "SELL"):
+            return s
+        rside = str(t.get("side") or "").upper()
+        for key in ("asset_id", "outcome"):
+            rv, mv = t.get(key), mo.get(key)
+            if rv and mv:
+                if str(mv) == str(rv):
+                    return {"BUY": "SELL", "SELL": "BUY"}.get(rside, "")
+                return rside
+        return rside
+
+    def _slice_counts(self, t: dict[str, Any], mo: dict[str, Any],
+                      side: str, token_id: str | None,
+                      own: set[str] | None, foreign: set[str] | None,
+                      claim_unknown: bool) -> bool:
+        """Whether one maker slice is OURS on the requested side and
+        token: funder address, slice side, slice asset (falling back to
+        the record asset only when the slice carries none), then the
+        order registry in only-mine mode."""
+        me = (self.funder or "").lower()
+        if me and str(mo.get("maker_address", "")).lower() != me:
+            return False
+        if self._slice_side(t, mo) != side:
+            return False
+        if not self._asset_ok(mo.get("asset_id") or t.get("asset_id"),
+                              token_id):
+            return False
+        if own is None:
+            return True
+        oid = str(mo.get("order_id") or "")
+        return oid in own or bool(claim_unknown and oid
+                                  and oid not in (foreign or set()))
+
+    def _taker_counts(self, t: dict[str, Any], side: str,
+                      token_id: str | None, own: set[str] | None,
+                      foreign: set[str] | None, claim_unknown: bool) -> bool:
+        """Whether one TAKER-role record is ours on the requested side and
+        token: top-level side and asset (the fields that describe US on a
+        taker record), then the order registry in only-mine mode."""
+        if t.get("side") != side or not self._asset_ok(t.get("asset_id"),
+                                                       token_id):
+            return False
+        if own is None:
+            return True
+        tid = str(t.get("taker_order_id") or "")
+        return tid in own or bool(claim_unknown and tid
+                                  and tid not in (foreign or set()))
+
+    def _maker_slice_totals(self, t: dict[str, Any], side: str,
+                            token_id: str | None = None,
                             own: set[str] | None = None,
                             foreign: set[str] | None = None,
                             claim_unknown: bool = False) -> tuple[float, float]:
-        """(shares, usd) WE filled in one MAKER-role trade record. The
-        top-level size is the counterparty's aggregate; ours is the sum of
-        the ``maker_orders`` slices matched by funder address (every slice
-        when no funder is configured). Records without slices fall back to
-        the top-level size. With ``own`` set (order-attribution mode), a
-        slice counts only if its order_id is in OUR registry, or unknown to
-        every registry while ``claim_unknown`` (post-uncertainty recovery)."""
+        """(shares, usd) WE filled on ``side`` in one MAKER-role trade
+        record. The top-level size/side/asset are the counterparty's
+        aggregate; ours are the ``maker_orders`` slices, matched by funder
+        address (every slice when no funder is configured) and by their
+        own side and asset. Records without slices fall back to the
+        top-level fields read as ours (trimmed archival records). With
+        ``own`` set (order-attribution mode), a slice counts only if its
+        order_id is in OUR registry, or unknown to every registry while
+        ``claim_unknown`` (post-uncertainty recovery)."""
         mos = t.get("maker_orders")
         if not isinstance(mos, list) or not mos:
+            if t.get("side") != side or not self._asset_ok(
+                    t.get("asset_id"), token_id):
+                return 0.0, 0.0
             if own is not None and not claim_unknown:
                 return 0.0, 0.0            # unattributable without slices
             sp = self._size_price(t)
             return (sp[0], sp[1] * sp[0]) if sp is not None else (0.0, 0.0)
-        me = (self.funder or "").lower()
         sh = usd = 0.0
         for mo in mos:
-            if not isinstance(mo, dict):
+            if not isinstance(mo, dict) or not self._slice_counts(
+                    t, mo, side, token_id, own, foreign, claim_unknown):
                 continue
-            if me and str(mo.get("maker_address", "")).lower() != me:
-                continue
-            if own is not None:
-                oid = str(mo.get("order_id") or "")
-                mine = oid in own or (claim_unknown and oid
-                                      and oid not in (foreign or set()))
-                if not mine:
-                    continue
             sp = self._size_price(mo, "matched_amount")
             if sp is not None:
                 sh += sp[0]
@@ -522,14 +614,21 @@ class PolymarketExecutor:
                       claim_unknown: bool = False,
                       ) -> tuple[float, float, float] | None:
         """Exchange truth for one market: (shares, usd, fee_estimate) actually
-        traded on our account, or None if the API is unreachable. FAILED
-        trades are excluded; maker fills carry zero fee.
+        traded on our account on ``side``, or None if the API is
+        unreachable. FAILED trades are excluded; maker fills carry zero fee.
 
-        MAKER-role records report the counterparty's AGGREGATE size at top
-        level (verified on a real settlement, 2026-07-04); our actual slice
-        lives in ``maker_orders``, matched by funder address. Set
-        POLY_FUNDER even for sig 0 accounts if you post resting orders,
-        otherwise all slices of bundled trades are attributed to you.
+        MAKER-role records report the COUNTERPARTY at top level: the
+        taker's side, asset and aggregate size (verified on real
+        settlements, 2026-07-04 and 2026-07-06); our fill lives in the
+        ``maker_orders`` slices, each carrying its own side and asset,
+        matched by funder address. Maker records are therefore never
+        pre-filtered by the top-level side, and the venue is queried by
+        condition alone (a server-side asset filter would hide maker
+        fills matched against the complementary token): ``side`` and
+        ``token_id`` are applied per record for takers and per slice for
+        makers. Set POLY_FUNDER even for sig 0 accounts if you post
+        resting orders, otherwise all slices of bundled trades are
+        attributed to you.
 
         Order attribution: with several order-senders sharing the wallet,
         configure ``order_log`` (POLY_ORDER_LOG) on each and list the others
@@ -542,7 +641,7 @@ class PolymarketExecutor:
         uncertain. Sound only if every sender on the account keeps a log."""
         try:
             trades = self.client.get_trades(
-                self._t["TradeParams"](market=condition_id, asset_id=token_id))
+                self._t["TradeParams"](market=condition_id))
         except Exception as e:
             log.warning("get_trades(%s) failed: %s", condition_id, e)
             return None
@@ -556,21 +655,17 @@ class PolymarketExecutor:
         foreign = self._foreign_ids() if only_mine else None
         sh = usd = fees = 0.0
         for t in trades or []:
-            if not isinstance(t, dict) or t.get("side") != side \
-                    or t.get("status") == "FAILED":
+            if not isinstance(t, dict) or t.get("status") == "FAILED":
                 continue
             if t.get("trader_side") == "MAKER":
-                dsh, dusd = self._maker_slice_totals(t, own, foreign,
-                                                     claim_unknown)
+                dsh, dusd = self._maker_slice_totals(t, side, token_id, own,
+                                                     foreign, claim_unknown)
                 sh += dsh
                 usd += dusd
                 continue                       # maker fills pay zero fee
-            if own is not None:
-                tid = str(t.get("taker_order_id") or "")
-                mine = tid in own or (claim_unknown and tid
-                                      and tid not in (foreign or set()))
-                if not mine:
-                    continue
+            if not self._taker_counts(t, side, token_id, own, foreign,
+                                      claim_unknown):
+                continue
             sp = self._size_price(t)
             if sp is None:
                 continue

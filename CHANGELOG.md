@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.6.1 (2026-07-06)
+
+* `trades_totals` no longer misses maker fills. MAKER-role trade records
+  carry the TAKER's side and asset at top level; the old top-level side
+  pre-filter therefore skipped our maker fills whenever the counterparty
+  was on the other side or on the complementary token (measured live
+  2026-07-06: 6 CONFIRMED maker fills, 16.97 shares for 16.19 USD,
+  reported as zero). The requested `side` and `token_id` now apply per
+  `maker_orders` slice, using the slice's own `side` and `asset_id`
+  fields (present on real records; verified on captured settlements of
+  2026-07-04 and 2026-07-06). Slices without a side field derive it:
+  same asset or outcome as the taker means the opposite side, the
+  complementary token (mint or merge match) means the same side, and
+  records with no per-slice information keep the record-side reading of
+  0.6.0. The venue is queried by condition alone because a server-side
+  asset filter can hide complementary-token maker fills entirely; taker
+  records are filtered in-process on their top-level asset instead. The
+  taker path is otherwise unchanged and locked by tests, and the
+  only-mine attribution gate applies to the recovered records exactly as
+  before.
+* `cancel_order` now parses the exchange response instead of trusting
+  the HTTP 200: the CLOB can decline a cancel inside a 200 while the
+  order is mid match (measured live 2026-07-06, where the blind True
+  freed budget while the order was still resting). True only when the
+  order id is listed under `canceled`; ids under `not_canceled` log the
+  venue's reason and return False; any unrecognized body shape reads as
+  NOT canceled.
+* `get_order(order_id)`: single-order truth (status, size_matched) for
+  harvesting the partial fill of an order right after it leaves the
+  book. Returns None on any error. The startup introspection table now
+  covers `get_order` like every other client member the executor calls.
+
 ## 0.6.0 (2026-07-05)
 
 * `pmq.stream.PriceStream`: standard-library client for the resolution

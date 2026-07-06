@@ -42,6 +42,9 @@ class FuzzClient:
     def cancel_orders(self, order_hashes):
         pass
 
+    def get_order(self, order_id):
+        return {}
+
     def get_open_orders(self, params=None, only_first_page=False, next_cursor=None):
         return []
 

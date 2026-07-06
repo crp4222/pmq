@@ -59,7 +59,7 @@ bring your own strategy).
 ## API sketch
 
 - Data: get_market(slug), parse_market(m), get_book(token_id), best_bid_ask(book), book_meta(book), band_ask_depth_usd(book, lo, hi), resolved_winner(pm), book_inferred_winner(bid_a, bid_b), get_tape(condition_id, since_ts), fee(price, shares, rate), FEE_RATES
-- Execution: PolymarketExecutor(key, funder, signature_type, builder_code, order_log, foreign_order_logs), .buy_fak(token_id, price_cap, usd) -> Fill, .sell_fak(token_id, price_floor, shares) -> Fill, .limit_gtc(...), .collateral(), .require_collateral(min_usd), .cancel_market(condition_id), .trades_totals(condition_id, only_mine, claim_unknown), .reconcile(condition_id)
+- Execution: PolymarketExecutor(key, funder, signature_type, builder_code, order_log, foreign_order_logs), .buy_fak(token_id, price_cap, usd) -> Fill, .sell_fak(token_id, price_floor, shares) -> Fill, .limit_gtc(...), .collateral(), .require_collateral(min_usd), .open_orders(condition_id), .cancel_order(order_id) -> bool (True only when the exchange confirms; a 200 can decline), .get_order(order_id), .cancel_market(condition_id), .trades_totals(condition_id, token_id, side, only_mine, claim_unknown) (counts maker fills from their maker_orders slices since 0.6.1), .reconcile(condition_id)
 - Fill: order_id, matched_shares, matched_usd, price, rejected, bool() is "did anything match"
 - Exceptions: OrderUncertain (outcome unknown: reconcile before trading again), IntrospectionMismatch (installed client drifted: refuse to trade)
 
