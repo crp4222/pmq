@@ -127,6 +127,16 @@ costs you `p + rate * p * (1 - p)`, not `p`.
   verify any fill's attribution yourself by grepping the settlement
   transaction calldata for the code.
 
+## 7. `{"error":"Could not create api key"}` on startup, yet everything works
+
+A 400 from `/auth/api-key` printed by the client at init. Harmless in the
+common case: the client tries to CREATE credentials before DERIVING the
+existing ones, and the create fails precisely because they already exist.
+If your executor reports ready right after, ignore the line. It is only a
+real failure when nothing works afterwards: then check the system clock
+(signature timestamps) and that the key you configured is the EOA that owns
+the account, not the deposit address (see section 3).
+
 ## The shape of a bot that survives
 
 The unifying principle behind all of the above: **fail closed**. Book a fill
