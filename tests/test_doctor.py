@@ -187,3 +187,38 @@ def test_rpc_walks_the_endpoint_list_and_rejects_error_bodies(monkeypatch):
     monkeypatch.setattr(doctor.urllib.request, "urlopen", error_body)
     with pytest.raises(RuntimeError):
         doctor._rpc("eth_getCode", ["0x0", "latest"])
+
+
+def test_check_surface_green_on_installed_client(capsys):
+    """The installed py-clob-client-v2 matches the verified surface, so the
+    executor would start clean. If this fails the client drifted and the
+    introspection tables need re-verifying (invariant #2)."""
+    assert doctor._check_surface() is True
+    assert "matches the verified surface" in capsys.readouterr().out
+
+
+def test_check_surface_reports_missing_method(monkeypatch, capsys):
+    """A drifted client (get_order gone) is caught, with the shared
+    IntrospectionMismatch wording 'method get_order missing', not the old
+    per-parameter 'get_order.order_id' form. Pins the doctor side of the
+    executor/doctor shared drift helper."""
+    from py_clob_client_v2.client import ClobClient
+    monkeypatch.setattr(ClobClient, "get_order", None)
+    assert doctor._check_surface() is False
+    out = capsys.readouterr().out
+    assert "method get_order missing" in out
+    assert "get_order.order_id" not in out
+
+
+def test_check_surface_missing_client_is_fatal(monkeypatch):
+    """No py-clob-client-v2 installed at all is fatal (None), not a drift."""
+    import builtins
+    real_import = builtins.__import__
+
+    def no_client(name, *a, **k):
+        if name.startswith("py_clob_client_v2"):
+            raise ImportError("not installed")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", no_client)
+    assert doctor._check_surface() is None

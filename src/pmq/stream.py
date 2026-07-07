@@ -204,6 +204,9 @@ class PriceStream:
             raise OSError("connect failed")
         try:
             ctx = ssl.create_default_context()
+            # explicit TLS 1.2 floor: already the create_default_context
+            # default on py>=3.10, stated so static analysers can prove it
+            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
             # the edge disables ws-over-h2: pin http/1.1 so ALPN never
             # selects it
             ctx.set_alpn_protocols(["http/1.1"])

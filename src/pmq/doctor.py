@@ -8,7 +8,6 @@ prints or transmits the private key. Exit code 0 when everything is green.
 """
 from __future__ import annotations
 
-import inspect
 import json
 import os
 import sys
@@ -77,22 +76,10 @@ def _check_surface() -> bool | None:
             OrderType,
         )
 
-        from .executor import (
-            _EXPECTED_MARKET_ARGS,
-            _EXPECTED_METHODS,
-            _EXPECTED_ORDER_ARGS,
-        )
-        drifts = []
-        for name, params in _EXPECTED_METHODS.items():
-            fn = getattr(ClobClient, name, None)
-            have = set(inspect.signature(fn).parameters) if fn else set()
-            drifts += [f"{name}.{p}" for p in params if p not in have]
-        have = set(inspect.signature(MarketOrderArgsV2).parameters)
-        drifts += [f"MarketOrderArgsV2.{p}" for p in _EXPECTED_MARKET_ARGS if p not in have]
-        have = set(inspect.signature(OrderArgsV2).parameters)
-        drifts += [f"OrderArgsV2.{p}" for p in _EXPECTED_ORDER_ARGS if p not in have]
-        if not hasattr(OrderType, "FAK"):
-            drifts.append("OrderType.FAK")
+        from .executor import _surface_drifts_over
+        drifts = _surface_drifts_over(
+            lambda n: getattr(ClobClient, n, None),
+            MarketOrderArgsV2, OrderArgsV2, OrderType)
         return check(not drifts, "installed py-clob-client-v2 matches the verified surface",
                      "drifted: " + ", ".join(drifts) if drifts else "")
     except ImportError as e:

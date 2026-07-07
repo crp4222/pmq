@@ -13,10 +13,12 @@ on every poll.
 Production notes baked in (all verified live on CLOB V2, July 2026):
 
 * FAK/FOK BUY orders are treated by the CLOB as MARKET orders: the maker
-  amount is USDC with at most 2 decimals. Posting them as plain limit orders
-  fails with ``invalid amounts, the market buy orders maker amount supports a
-  max accuracy of 2 decimals``. pmq routes them through the market-order
-  builder, which applies the correct rounding.
+  amount is USDC with at most 2 decimals and the taker amount at most 4.
+  Posting them as plain limit orders fails with ``invalid amounts, the
+  market buy orders maker amount supports a max accuracy of 2 decimals,
+  taker amount a max of 4 decimals``. pmq routes them through the
+  market-order builder and clamps the taker precision (see
+  ``_patch_market_taker_precision``), which applies the correct rounding.
 * A 400 ``no orders found to match with FAK order`` WITH an orderID in the
   body is a clean no-fill (the ask vanished between your poll and your send),
   not an error state.
@@ -38,7 +40,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from decimal import ROUND_DOWN, Decimal
-from typing import Any
+from typing import Any, Callable
 
 from .data import FEE_RATES, fee
 from .exceptions import IntrospectionMismatch, OrderUncertain
@@ -131,6 +133,34 @@ _EXPECTED_ORDER_ARGS: tuple[str, ...] = (
     "token_id", "price", "size", "side", "builder_code")
 
 
+def _surface_drifts_over(resolve_method: Callable[[str], Any], market_ctor: Any,
+                         order_ctor: Any, order_type: Any) -> list[str]:
+    """Single source of the surface-drift LOGIC over the _EXPECTED_* tables.
+    Both the live executor (bound client instance) and the offline doctor
+    (client class) call this, so the introspection cannot drift between them.
+    ``resolve_method(name)`` returns the client callable or None. Messages
+    are the IntrospectionMismatch contract (pinned by tests)."""
+    drifts: list[str] = []
+    for name, params in _EXPECTED_METHODS.items():
+        fn = resolve_method(name)
+        if fn is None:
+            drifts.append(f"method {name} missing")
+            continue
+        try:
+            have = set(inspect.signature(fn).parameters)
+        except (TypeError, ValueError):
+            continue
+        drifts += [f"{name}() lost parameter {p}" for p in params if p not in have]
+    for label, ctor, expected in (
+            ("MarketOrderArgsV2", market_ctor, _EXPECTED_MARKET_ARGS),
+            ("OrderArgsV2", order_ctor, _EXPECTED_ORDER_ARGS)):
+        have = set(inspect.signature(ctor).parameters)
+        drifts += [f"{label} lost field {p}" for p in expected if p not in have]
+    if not hasattr(order_type, "FAK"):
+        drifts.append("OrderType.FAK missing")
+    return drifts
+
+
 class PolymarketExecutor:
     """Thin, fail-closed wrapper around the official py-clob-client-v2.
 
@@ -219,28 +249,10 @@ class PolymarketExecutor:
 
     # ---------------- introspection guard ----------------
     def _surface_drifts(self) -> list[str]:
-        drifts: list[str] = []
-        for name, params in _EXPECTED_METHODS.items():
-            fn = getattr(self.client, name, None)
-            if fn is None:
-                drifts.append(f"method {name} missing")
-                continue
-            try:
-                have = set(inspect.signature(fn).parameters)
-            except (TypeError, ValueError):
-                continue
-            for p in params:
-                if p not in have:
-                    drifts.append(f"{name}() lost parameter {p}")
-        for label, ctor, expected in (
-                ("MarketOrderArgsV2", self._t["MarketOrderArgs"], _EXPECTED_MARKET_ARGS),
-                ("OrderArgsV2", self._t["OrderArgs"], _EXPECTED_ORDER_ARGS)):
-            have = set(inspect.signature(ctor).parameters)
-            drifts += [f"{label} lost field {p}" for p in expected if p not in have]
-        if not hasattr(self._t["OrderType"], "FAK"):
-            drifts.append("OrderType.FAK missing")
-        drifts += self._amount_precision_drifts()
-        return drifts
+        return _surface_drifts_over(
+            lambda n: getattr(self.client, n, None),
+            self._t["MarketOrderArgs"], self._t["OrderArgs"],
+            self._t["OrderType"]) + self._amount_precision_drifts()
 
     def _amount_precision_drifts(self) -> list[str]:
         """Behavioral guard: the exchange caps signed MARKET-order amounts at
