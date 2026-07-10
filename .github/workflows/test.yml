@@ -20,3 +20,20 @@ jobs:
       - run: ruff check .
       - run: mypy
       - run: pytest -q --cov=pmq --cov-fail-under=85
+
+  wheel-mcp-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Build and install the wheel with the MCP extra
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+          python -m venv /tmp/pmq-wheel
+          wheel=$(find dist -name '*.whl' -print -quit)
+          /tmp/pmq-wheel/bin/pip install "${wheel}[mcp]"
+      - name: Verify the installed MCP entry point starts on stdio
+        run: /tmp/pmq-wheel/bin/pmq-mcp </dev/null

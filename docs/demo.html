@@ -227,7 +227,7 @@
 
   <div class="setup">
     <p class="cap">The whole setup, any MCP client</p>
-<pre><code>{ "mcpServers": { "pmq": { "command": "pmq-mcp", "env": { "PMQ_MCP_PAPER": "1" } } } }</code></pre>
+<pre><code>{ "mcpServers": { "pmq": { "command": "uvx", "args": ["--from", "pmquant[mcp]", "pmq-mcp"], "env": { "PMQ_MCP_PAPER": "1" } } } }</code></pre>
   </div>
 
   <ol class="steps">
@@ -326,7 +326,7 @@
       </div>
       <p class="gloss">The simulator fills at the real best ask, never at the wished
       cap, caps the fill at the displayed size, refuses anything under the 5-share
-      exchange minimum, and charges the documented taker fee formula,
+      exchange minimum, and uses the documented crypto-rate fee estimate,
       rate&#183;p&#183;(1-p)&#183;shares. No order was sent: with
       <code>PMQ_MCP_PAPER=1</code> none can be.</p>
     </li>
@@ -357,21 +357,27 @@
       <tr><td><code>PMQ_MCP_MAX_USD</code></td>
           <td>hard cap per single order, default 10, enforced in live and paper alike</td></tr>
       <tr><td><code>PMQ_MCP_DAILY_USD</code></td>
-          <td>cumulative buy budget per UTC day; unknown outcomes conservatively consume it until reconciled</td></tr>
+          <td>durable cumulative buy budget per UTC day; unknown outcomes retain their requested reservation through that day</td></tr>
+      <tr><td><code>PMQ_MCP_STATE_FILE</code></td>
+          <td>local durable paper-ledger and daily-budget file; defaults to XDG state, otherwise ~/.local/state</td></tr>
     </tbody>
   </table>
   <p class="note" style="margin-top:10px">Structural rails on top: only
   fill-and-kill orders exist, so nothing ever rests unattended on the book; a fill
   is booked only from an exchange confirmation, never from optimism; any uncertain
-  outcome routes the agent to reconciliation before it may trade that market again.</p>
+  outcome is surfaced for reconciliation.</p>
+  <p class="note">The local state contains paper cash, positions, fills, and the
+  daily budget, never key material. It is atomically updated; use one state file per
+  concurrently running server. A live buy reserves its requested amount before the
+  client call and settles to the confirmed amount afterward. If its outcome is
+  unknown, that full reservation remains through the UTC day.</p>
 
   <h2>Run it yourself</h2>
-<pre><code>pip install "pmquant[mcp]"</code></pre>
+<pre><code>uvx --from "pmquant[mcp]" pmq-mcp</code></pre>
   <p class="note">Then point your MCP client (Claude Desktop or Code, ChatGPT,
-  LangChain, a bare SDK loop) at <code>pmq-mcp</code> with
-  <code>PMQ_MCP_PAPER=1</code>, as in the snippet at the top, and ask the agent to
-  find a market and trade it. Books move, so your numbers will differ from this
-  captured session.</p>
+  LangChain, a bare SDK loop) at the <code>uvx</code> configuration above with
+  <code>PMQ_MCP_PAPER=1</code>, and ask the agent to find a market and trade it.
+  Books move, so your numbers will differ from this captured session.</p>
 
   <p class="note" style="margin-top:18px">Every figure on this page comes from the
   captured session of 2026-07-04, unedited. The page itself is one file of HTML and

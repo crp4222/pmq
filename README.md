@@ -31,18 +31,27 @@ pip install pmquant        # Python >= 3.10; distribution pmquant, import pmq
 
 ## Try it in 30 seconds, no keys
 
-Point any MCP client at `pmq-mcp` with one environment variable:
+Point any MCP client at `uvx`; it installs the MCP extra in an isolated
+environment and starts `pmq-mcp` with one environment variable:
 
 ```json
-{ "mcpServers": { "pmq": { "command": "pmq-mcp", "env": { "PMQ_MCP_PAPER": "1" } } } }
+{
+  "mcpServers": {
+    "pmq": {
+      "command": "uvx",
+      "args": ["--from", "pmquant[mcp]", "pmq-mcp"],
+      "env": { "PMQ_MCP_PAPER": "1" }
+    }
+  }
+}
 ```
 
 `PMQ_MCP_PAPER=1` registers the same trading tools as live, but fills are
-**simulated against the real live order books** (real best ask, real
-exchange minimums, the official taker fee formula) from a paper balance
-(default 1000, set `PMQ_MCP_PAPER_USD`). No keys anywhere, and no order
-can reach the exchange. A real session, captured 2026-07-04, quoted
-verbatim:
+**simulated against the real live order books** using the displayed best
+quote, venue minimums, and a documented crypto-rate fee estimate. The first
+paper ledger starts at 1000 USD, configurable with `PMQ_MCP_PAPER_USD`; it
+then persists locally across server restarts. No keys are needed and no order
+can reach the exchange. A real session, captured 2026-07-04, quoted verbatim:
 
 ```text
 > find_markets(query="fed decision july")
@@ -284,33 +293,38 @@ feeds Polymarket's builder program and funds this project at zero cost to you.
 
 ## Agents: the MCP server
 
-`pip install "pmquant[mcp]"` then run `pmq-mcp` (stdio). Listed in the
-[official MCP registry](https://registry.modelcontextprotocol.io) as
-`io.github.crp4222/pmq`. Any MCP-speaking client works: Claude Desktop or
-Code, ChatGPT, LangChain, a bare SDK loop; the server neither knows nor
-cares which model drives it.
+For an installed server, run `pip install "pmquant[mcp]"` then `pmq-mcp`
+(stdio). For a clean MCP-client configuration, use
+`uvx --from "pmquant[mcp]" pmq-mcp` as in the paper example above. Listed in
+the [official MCP registry](https://registry.modelcontextprotocol.io) as
+`io.github.crp4222/pmq`, it works with Claude Desktop or Code, ChatGPT,
+LangChain, and a bare SDK loop.
 
 **What an agent can do, exactly:**
 
 | Tool | Needs | What it does |
 |---|---|---|
+| `pmq_status` | nothing | mode, registered trading surface, caps, daily headroom, and durable-state health without constructing a signer |
 | `find_markets` | nothing | discover active markets, any category, full-text search |
 | `event` | nothing | all binary markets of a multi-outcome event (elections, tournaments) |
 | `market` | nothing | slug to condition id, outcome names, token ids, close time, winner |
+| `market_snapshot` | nothing | resolve a market and read a top-of-book summary for every outcome in one call |
 | `book` | nothing | real-time bid/ask with sizes, depth in a price range, exchange minimums |
+| `order_preview` | nothing | non-mutating top-of-book FAK estimate with rails and a crypto-rate fee estimate; it never creates a signer, submits an order, or reserves budget |
 | `taker_fee` | nothing | official fee formula per category, cost per share including fee |
-| `account_collateral` | keys | CLOB-visible balance, with sig_type diagnostic |
-| `account_trades` | keys | exchange-truth BUY totals of our account on one market |
-| `fak_buy` | keys + `PMQ_MCP_LIVE=1` | open a position: fill-and-kill buy, nothing ever rests |
-| `fak_sell` | keys + `PMQ_MCP_LIVE=1` | close a position: fill-and-kill sell, same contract |
-| `cancel_and_reconcile` | keys + `PMQ_MCP_LIVE=1` | cancel everything resting on a market, return exchange truth |
+| `account_collateral` | paper mode, or keys | paper cash or the CLOB-visible live balance with a sig_type diagnostic |
+| `account_trades` | paper mode, or keys | paper totals or exchange-truth BUY totals on one market |
+| `account_portfolio` | paper mode, or public wallet | durable paper positions, or public Data API positions for `wallet` or `POLY_FUNDER` |
+| `fak_buy` | `PMQ_MCP_PAPER=1`, or keys plus `PMQ_MCP_LIVE=1` | open a position with a fill-and-kill buy; nothing rests |
+| `fak_sell` | `PMQ_MCP_PAPER=1`, or keys plus `PMQ_MCP_LIVE=1` | close a position with a fill-and-kill sell under the same contract |
+| `cancel_and_reconcile` | `PMQ_MCP_PAPER=1`, or keys plus `PMQ_MCP_LIVE=1` | cancel resting orders and return reconciliation truth; paper has nothing resting |
 
 With `PMQ_MCP_PAPER=1` (the [30-second demo](#try-it-in-30-seconds-no-keys)
 above) the same trading and account tools are registered **keyless**:
-fills are simulated at the real best ask, capped by the displayed size,
-refused under the exchange minimum, and the account tools report the
-paper balance. Responses keep the live shape, flagged `paper: true`, and
-no order ever reaches the exchange.
+fills are simulated at the displayed best quote, capped by the displayed
+size, refused under the exchange minimum, and the account tools report the
+durable paper ledger. `order_preview` remains read-only in every mode.
+Paper responses are flagged `paper: true`, and no order reaches the exchange.
 
 **The rails, all operator-set (server environment, invisible to and
 untouchable by the model):**
@@ -319,28 +333,46 @@ untouchable by the model):**
 |---|---|---|
 | `PMQ_MCP_LIVE` | unset: the three trading tools are never REGISTERED; an agent cannot call a tool that does not exist | read-only |
 | `PMQ_MCP_PAPER` | trading tools simulate fills against the real live books, keyless, nothing sent to the exchange; wins over `PMQ_MCP_LIVE` when both are set | off |
-| `PMQ_MCP_PAPER_USD` | paper starting balance | 1000 |
+| `PMQ_MCP_PAPER_USD` | initial paper balance when a new state file is created | 1000 |
 | `PMQ_MCP_MAX_USD` | hard cap per single order, live and paper alike | 10 |
-| `PMQ_MCP_DAILY_USD` | cumulative BUY budget per UTC day; confirmed spend counts, an unknown outcome conservatively consumes the full requested amount until reconciled | off |
+| `PMQ_MCP_DAILY_USD` | durable cumulative BUY budget per UTC day; unknown live results retain their requested reservation through that UTC day | off |
+| `PMQ_MCP_STATE_FILE` | local file for the durable paper ledger and daily budget | `$XDG_STATE_HOME/pmq/mcp-state.json`, otherwise `~/.local/state/pmq/mcp-state.json` |
 | `POLY_*` keys | omit them entirely for a data-only server | absent |
 
 Structural rails on top: only FAK orders exist (nothing rests unattended on
-the book), every uncertain outcome routes the agent to reconciliation
-before it may trade that market again, and fills are booked only from
-exchange confirmations, never from optimism.
+the book), every uncertain outcome is surfaced for reconciliation, and fills
+are booked only from exchange confirmations, never from optimism.
+
+The state file contains paper cash, positions, fills, and the daily budget,
+never key material. It is atomically replaced on update. Use a distinct state
+file for each concurrently running server. A live buy reserves its requested
+amount before the client call, then settles that reservation to an
+exchange-confirmed amount. A clean rejection releases it; an unknown outcome
+keeps the full reservation through the UTC day. `pmq_status` exposes state
+health without exposing secrets. If a required durable write fails, the
+affected buy is refused rather than proceeding without its rail.
 
 ```json
 {
   "mcpServers": {
     "pmq": {
-      "command": "pmq-mcp",
-      "env": { "POLY_PRIVATE_KEY": "...", "POLY_FUNDER": "0x...", "POLY_SIG_TYPE": "3" }
+      "command": "uvx",
+      "args": ["--from", "pmquant[mcp]", "pmq-mcp"],
+      "env": {
+        "PMQ_MCP_LIVE": "1",
+        "PMQ_MCP_MAX_USD": "10",
+        "PMQ_MCP_DAILY_USD": "25",
+        "POLY_PRIVATE_KEY": "...",
+        "POLY_FUNDER": "0x...",
+        "POLY_SIG_TYPE": "3"
+      }
     }
   }
 }
 ```
 
-Leave the `POLY_*` variables out entirely for a read-only market-data server.
+Remove `PMQ_MCP_LIVE` and the `POLY_*` variables entirely for a read-only
+market-data server.
 
 ## Bot template
 

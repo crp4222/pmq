@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.7.0 (2026-07-10)
+
+* MCP: `pmq_status` reports the active mode, registered trading surface,
+  configured caps, daily headroom, and state health without constructing a
+  signer. `market_snapshot` combines market resolution with a book summary
+  for each outcome; `order_preview` is an explicitly non-mutating top-of-book
+  FAK estimate; `account_portfolio` returns durable paper positions or public
+  Data API positions for a wallet. The new read surface works without keys.
+* MCP state is now a schema-versioned local ledger, atomically replaced on
+  update. It persists paper cash, positions, fills, and daily buy headroom at
+  `PMQ_MCP_STATE_FILE`, `$XDG_STATE_HOME/pmq`, or `~/.local/state/pmq`. There is no key
+  material in it. A live buy reserves the requested daily amount before its
+  client call, settles to a confirmed amount afterward, and retains an
+  unknown result's full reservation through the rest of the UTC day. A
+  required state-write failure fails closed.
+* Paper fills and previews share one displayed-top-of-book simulation. They
+  cap execution to shown liquidity and venue minimums, and label their fee as
+  a crypto-table estimate rather than exchange-confirmed cost.
+* Packaging: MCP clients now install the optional extra with
+  `pmquant[mcp]`; the MCP dependency is bounded below 2. README and the demo
+  use a clean `uvx --from "pmquant[mcp]" pmq-mcp` configuration, and the live
+  example explicitly enables `PMQ_MCP_LIVE=1`.
+
 ## 0.6.1 (2026-07-06)
 
 * `trades_totals` no longer misses maker fills. MAKER-role trade records

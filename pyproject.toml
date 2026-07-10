@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pmquant"
-version = "0.6.1"
+version = "0.7.0"
 description = "Fail-closed execution and market-data layer for Polymarket CLOB V2: local signing, confirmed fills only, fee-correct math, working deposit-wallet (POLY_1271) support."
 readme = "README.md"
 license = { text = "MIT" }
@@ -38,8 +38,8 @@ Issues = "https://github.com/crp4222/pmq/issues"
 Changelog = "https://github.com/crp4222/pmq/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
-mcp = ["mcp>=1.2"]
-dev = ["pytest>=8", "pytest-cov>=5", "mcp>=1.2", "ruff>=0.6", "mypy>=1.10", "hypothesis>=6.100"]
+mcp = ["mcp>=1.2,<2"]
+dev = ["pytest>=8", "pytest-cov>=5", "mcp>=1.2,<2", "ruff>=0.6", "mypy>=1.10", "hypothesis>=6.100"]
 
 [project.scripts]
 pmq-mcp = "pmq.mcp:main"
