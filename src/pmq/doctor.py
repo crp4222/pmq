@@ -1,10 +1,14 @@
 """pmq-doctor: one command that diagnoses the classic Polymarket V2 setup
 failures (the ones behind a dozen open issues on the official client):
-wrong signature_type for a deposit wallet, api key confusion, CLOB balance 0
-while funds sit on-chain, drifted client surface, per-market minimums.
+an unfunded or wrong funder address, wrong signature_type for a deposit
+wallet, funds on-chain that no signature_type sees (wallet never associated
+with the CLOB backend), api key confusion, drifted client surface,
+per-market minimums.
 
 Read-only: derives addresses, calls public RPC and CLOB endpoints. Never
-prints or transmits the private key. Exit code 0 when everything is green.
+prints or transmits the private key, and never posts an order: it verifies
+the setup causes, not the order path itself. Exit code 0 when everything is
+green.
 """
 from __future__ import annotations
 
@@ -46,14 +50,22 @@ def looks_like_minimal_proxy(bytecode: str | None) -> bool:
     return bytecode not in (None, "", "0x") and len(bytecode or "") < 400
 
 
-def advise_sig_type(funder_is_contract: bool, owner_is_eoa: bool,
+def advise_sig_type(funder_is_contract: bool, owner_is_eoa: bool | None,
                     funder_equals_eoa: bool) -> tuple[int | None, str]:
-    """One sentence of advice from the on-chain facts."""
+    """One sentence of advice from the on-chain facts. ``owner_is_eoa`` is
+    tri-state: None means owner() gave no answer (some Polymarket wallet
+    generations, ERC-1967 beacon proxies and ERC-1167 clones, do not expose
+    it), which is unverifiable, not wrong."""
     if funder_equals_eoa:
         return 0, "funder IS the EOA: signature_type=0"
     if funder_is_contract and owner_is_eoa:
         return 3, ("funder is a contract owned by your EOA: a deposit wallet, "
                    "signature_type=3 (POLY_1271)")
+    if funder_is_contract and owner_is_eoa is None:
+        return None, ("owner() not readable on the funder (usual for ERC-1967 "
+                      "beacon and ERC-1167 clone generations): ownership "
+                      "unverifiable read-only, the CLOB collateral check below "
+                      "is the authority")
     if funder_is_contract:
         return None, ("funder is a contract NOT owned by this EOA: wrong "
                       "POLY_PRIVATE_KEY, or someone else's wallet")
@@ -63,6 +75,12 @@ def advise_sig_type(funder_is_contract: bool, owner_is_eoa: bool,
 def check(ok: object, label: str, detail: str = "") -> bool:
     print(f"{GREEN if ok else RED} {label}" + (f": {detail}" if detail else ""))
     return bool(ok)
+
+
+def warn(label: str, detail: str = "") -> bool:
+    """A [??] line: could not be verified read-only. Never fails the run."""
+    print(f"{WARN} {label}" + (f": {detail}" if detail else ""))
+    return True
 
 
 def _check_surface() -> bool | None:
@@ -111,56 +129,138 @@ def _check_identity() -> tuple[bool, str, str | None, str, int] | None:
     return ok, eoa, funder, sig, sig_val
 
 
-def _check_funder(eoa: str, funder: str | None) -> tuple[bool, int | None]:
-    """On-chain truth about the funder. Returns (ok, expected_sig);
-    expected_sig None means no advice possible (wrong wallet, RPC down)."""
-    if funder and funder.lower() != eoa.lower():
+def _owner_of(addr: str) -> str | None:
+    """owner() of a contract wallet; None when it reverts or answers nothing
+    (unverifiable, NOT proof of a wrong key)."""
+    try:
+        res = _rpc("eth_call", [{"to": addr, "data": "0x8da5cb5b"}, "latest"])
+    except Exception:
+        return None
+    return "0x" + res[-40:] if isinstance(res, str) and len(res) >= 42 else None
+
+
+def _check_funded(addr: str) -> tuple[bool, float]:
+    """On-chain pUSD balance at the funding address, as its own verdict.
+    Zero is the issue-#87 shape: nothing was ever deposited there."""
+    raw = _rpc("eth_call", [{"to": PUSD, "data":
+              "0x70a08231" + addr.lower()[2:].rjust(64, "0")}, "latest"])
+    bal = int(raw, 16) / 1e6
+    if bal > 0:
+        return check(True, "funder holds USDC on-chain", f"{bal:.2f} pUSD"), bal
+    return check(False, "funder holds no USDC on-chain",
+                 "deposit first, or wrong funder address"), bal
+
+
+def _funder_wallet_status(eoa: str, funder: str) -> tuple[bool, int | None]:
+    """One verdict line about the funder contract: green when owned by this
+    EOA, warn when owner() is unreadable (proxy generations differ), red only
+    when owner() names a DIFFERENT address or the funder has no code."""
+    code = _rpc("eth_getCode", [funder, "latest"])
+    is_contract = code not in (None, "", "0x")
+    owner = _owner_of(funder) if is_contract else None
+    owner_is_eoa = None if owner is None else owner.lower() == eoa.lower()
+    expected_sig, advice = advise_sig_type(is_contract, owner_is_eoa, False)
+    if is_contract and owner_is_eoa is None:
+        ok = warn("funder wallet on-chain", advice)
+        print("     bytecode is " + ("an ERC-1167 minimal proxy, the deposit wallet shape"
+              if looks_like_minimal_proxy(code) else "a full contract, not a minimal proxy"))
+        return ok, expected_sig
+    return check(expected_sig is not None, "funder wallet on-chain", advice), expected_sig
+
+
+def _check_funder(eoa: str, funder: str | None) -> tuple[bool, int | None, float | None]:
+    """On-chain truth about the funder. Returns (ok, expected_sig, onchain_usd);
+    expected_sig None means no on-chain advice possible (wrong wallet,
+    unverifiable owner, RPC down); onchain_usd None means balance unknown."""
+    self_funded = not funder or funder.lower() == eoa.lower()
+    try:
+        if self_funded:
+            expected_sig, advice = advise_sig_type(False, False, True)
+            ok = check(True, "funder", advice)
+        else:
+            ok, expected_sig = _funder_wallet_status(eoa, funder or "")
+        funded, bal = _check_funded(funder or eoa)
+        return ok and funded, expected_sig, bal
+    except Exception as e:
+        return (check(False, "on-chain funder checks (RPC)", str(e)[:120]),
+                0 if self_funded else None, None)
+
+
+def _check_api_key(ex: Any) -> bool:
+    """The api key handshake, made explicit: create returns 400 when a key
+    already exists, and create_or_derive_api_key then derives that existing
+    key. Non fatal by construction, consistent with a key that already
+    exists. The key belongs to the EOA (shown so it can be eyeballed against
+    the derived EOA above), whatever wallet signs the orders."""
+    try:
+        addr = ex.client.get_address()
+        raw = ex.client.get_api_keys()
+        keys = raw.get("apiKeys") if isinstance(raw, dict) else raw
+        n = len(keys) if isinstance(keys, list) else 0
+        return check(n > 0, f"api key registered for EOA {addr}",
+                     f"{n} key(s); a 400 from create is non fatal by "
+                     "construction: the key already exists and derive returns it")
+    except Exception as e:
+        return check(False, "api key listing (L2 auth)", str(e)[:120])
+
+
+def _probe_sig_types(sig_val: int) -> int | None:
+    """Try the other signature types read-only; name the one that sees funds."""
+    from .executor import PolymarketExecutor
+    for st in (0, 1, 2, 3):
+        if st == sig_val:
+            continue
         try:
-            code = _rpc("eth_getCode", [funder, "latest"])
-            is_contract = code not in (None, "", "0x")
-            owner = None
-            try:
-                res = _rpc("eth_call", [{"to": funder, "data": "0x8da5cb5b"}, "latest"])
-                if isinstance(res, str) and len(res) >= 42:
-                    owner = "0x" + res[-40:]
-            except Exception:
-                pass
-            owner_is_eoa = owner is not None and owner.lower() == eoa.lower()
-            expected_sig, advice = advise_sig_type(is_contract, owner_is_eoa, False)
-            ok = check(expected_sig is not None, "funder wallet on-chain", advice)
-            bal = int(_rpc("eth_call", [{"to": PUSD, "data":
-                      "0x70a08231" + funder.lower()[2:].rjust(64, "0")}, "latest"]), 16) / 1e6
-            print(f"     on-chain pUSD at funder: {bal:.2f}")
-            return ok, expected_sig
-        except Exception as e:
-            return check(False, "on-chain funder checks (RPC)", str(e)[:120]), None
-    expected_sig, advice = advise_sig_type(False, False, True)
-    check(True, "funder", advice)
-    return True, expected_sig
+            alt = PolymarketExecutor(signature_type=st).collateral()
+        except Exception:
+            continue
+        if alt > 0:
+            print(f"     but sig_type={st} sees {alt:.2f} USDC: "
+                  f"set POLY_SIG_TYPE={st}")
+            return st
+    return None
 
 
-def _check_clob(sig: str, sig_val: int) -> bool:
+def _check_clob(sig: str, sig_val: int, onchain_usd: float | None) -> bool:
     """Does the CLOB see collateral with the configured identity? On zero,
-    probe the other signature types and name the one that works."""
+    probe the other signature types and name the one that works; funds
+    sitting on-chain that NO signature type sees mean the wallet was never
+    associated with the CLOB backend."""
     try:
         from .executor import PolymarketExecutor
-        usdc = PolymarketExecutor().collateral()
-        seen = check(usdc > 0, f"CLOB sees collateral with sig_type={sig}", f"{usdc:.2f} USDC")
-        if not seen:
-            for st in (0, 1, 2, 3):
-                if st == sig_val:
-                    continue
-                try:
-                    alt = PolymarketExecutor(signature_type=st).collateral()
-                    if alt > 0:
-                        print(f"     but sig_type={st} sees {alt:.2f} USDC: "
-                              f"set POLY_SIG_TYPE={st}")
-                        break
-                except Exception:
-                    continue
-        return seen
+        ex = PolymarketExecutor()
+        ok = _check_api_key(ex)
+        usdc = ex.collateral()
+        if usdc > 0:
+            return check(True, f"CLOB sees collateral with sig_type={sig}",
+                         f"{usdc:.2f} USDC") and ok
+        detail = ("funds on-chain but CLOB sees 0: wrong signature_type or "
+                  "wallet not associated" if onchain_usd else "0.00 USDC")
+        check(False, f"CLOB sees collateral with sig_type={sig}", detail)
+        if _probe_sig_types(sig_val) is None and onchain_usd:
+            print("     no signature_type sees the on-chain funds: the wallet "
+                  "was never associated with the CLOB backend; create it in "
+                  "the Polymarket app, or deploy it via the relayer "
+                  "(deploy_deposit_wallet) or polymarket-client "
+                  "AsyncSecureClient.create")
+        return False
     except Exception as e:
         return check(False, "CLOB auth/collateral", str(e)[:160])
+
+
+def _signer_note(sig_val: int) -> None:
+    """Printed under signature_type=3 only: what this doctor can and cannot
+    prove. Order signing uses the deposit wallet while the api key stays the
+    EOA's; only the backend association makes the pair valid."""
+    if sig_val != 3:
+        return
+    print('     note: with sig_type=3 the order signer is the deposit wallet '
+          'and the api key belongs to the EOA, by design; orders authorize '
+          'only when the CLOB backend links the two. This doctor is read-only '
+          'and never posts an order: if every line above is green and orders '
+          'still fail with "signer must be the address of the API KEY", the '
+          'missing link is that backend association (Polymarket app, relayer '
+          'deploy_deposit_wallet, or polymarket-client AsyncSecureClient.create)')
 
 
 def _check_market(market_arg: str) -> bool:
@@ -208,14 +308,15 @@ def main(argv: list[str] | None = None) -> int:
     id_ok, eoa, funder, sig, sig_val = identity
     all_ok &= id_ok
 
-    funder_ok, expected_sig = _check_funder(eoa, funder)
+    funder_ok, expected_sig, onchain_usd = _check_funder(eoa, funder)
     all_ok &= funder_ok
     if expected_sig is not None:
         good = sig_val == expected_sig
         all_ok &= check(good, f"POLY_SIG_TYPE={sig} matches the wallet type",
                         "" if good else f"set POLY_SIG_TYPE={expected_sig}")
 
-    all_ok &= _check_clob(sig, sig_val)
+    all_ok &= _check_clob(sig, sig_val, onchain_usd)
+    _signer_note(sig_val)
 
     if market_arg:
         all_ok &= _check_market(market_arg)

@@ -31,8 +31,13 @@ def rpc_mock(code=PROXY_CODE, owner=EOA, balance_usd=50.0):
 
 
 class FakeExecutor:
-    """CLOB stand-in: collateral visible only under the right sig_type."""
+    """CLOB stand-in: collateral visible only under the right sig_type; the
+    api key surface (get_address, get_api_keys) answers like a live client,
+    so ``self.client is self``. Set ``api_keys`` to an Exception to model a
+    broken L2 auth."""
     balances = {}
+    api_keys: object = {"apiKeys": ["key-1"]}
+    raise_for: frozenset = frozenset()
 
     def __init__(self, signature_type=None, **kw):
         if signature_type is None:
@@ -41,9 +46,21 @@ class FakeExecutor:
             except ValueError:
                 signature_type = -1
         self.st = signature_type
+        if self.st in type(self).raise_for:
+            raise RuntimeError("no executor for this sig type")
+        self.client = self
 
     def collateral(self):
         return type(self).balances.get(self.st, 0.0)
+
+    def get_address(self):
+        return EOA
+
+    def get_api_keys(self):
+        keys = type(self).api_keys
+        if isinstance(keys, Exception):
+            raise keys
+        return keys
 
 
 @pytest.fixture
@@ -57,6 +74,8 @@ def setup(monkeypatch):
             monkeypatch.delenv("POLY_FUNDER", raising=False)
         monkeypatch.setattr(doctor, "_rpc", rpc or rpc_mock())
         FakeExecutor.balances = balances or {}
+        FakeExecutor.api_keys = {"apiKeys": ["key-1"]}
+        FakeExecutor.raise_for = frozenset()
         monkeypatch.setattr("pmq.executor.PolymarketExecutor", FakeExecutor)
     return _setup
 
@@ -66,6 +85,23 @@ def test_advise_sig_type_matrix():
     assert doctor.advise_sig_type(True, True, False)[0] == 3
     assert doctor.advise_sig_type(True, False, False)[0] is None
     assert doctor.advise_sig_type(False, False, False)[0] is None
+    sig, msg = doctor.advise_sig_type(True, None, False)   # owner() unreadable
+    assert sig is None and "owner() not readable" in msg
+    assert "NOT owned" not in msg
+
+
+def test_owner_of_tristate(monkeypatch):
+    """_owner_of: an address answer, an empty answer (0x), a revert."""
+    monkeypatch.setattr(doctor, "_rpc",
+                        lambda m, p: "0x" + "0" * 24 + OTHER[2:])
+    assert doctor._owner_of(FUNDER).lower() == OTHER.lower()
+    monkeypatch.setattr(doctor, "_rpc", lambda m, p: "0x")
+    assert doctor._owner_of(FUNDER) is None
+
+    def revert(m, p):
+        raise RuntimeError("execution reverted")
+    monkeypatch.setattr(doctor, "_rpc", revert)
+    assert doctor._owner_of(FUNDER) is None
 
 
 def test_minimal_proxy_detector():
@@ -133,6 +169,122 @@ def test_garbage_sig_type_is_diagnosed_not_crashed(setup, capsys):
     setup(sig="three", balances={0: 10.0})
     assert doctor.main([]) == 1
     assert "is not" in capsys.readouterr().out
+
+
+def test_unfunded_funder_is_a_clear_red(setup, capsys):
+    """Issue-#87 shape: the funder was never deposited to. The verdict names
+    the deposit, not a signature_type or association problem."""
+    setup(sig="3", funder=FUNDER, rpc=rpc_mock(balance_usd=0.0), balances={})
+    assert doctor.main([]) == 1
+    out = capsys.readouterr().out
+    assert "funder holds no USDC on-chain" in out
+    assert "deposit first, or wrong funder address" in out
+    assert "not associated" not in out          # zero on-chain is NOT that case
+
+
+def test_funds_onchain_but_no_sig_type_sees_them_names_association(setup, capsys):
+    """pUSD sits at the funder but the CLOB reports 0 under every
+    signature_type: the wallet was never associated with the backend."""
+    setup(sig="3", funder=FUNDER, balances={})
+    assert doctor.main([]) == 1
+    out = capsys.readouterr().out
+    assert ("funds on-chain but CLOB sees 0: wrong signature_type or "
+            "wallet not associated") in out
+    assert "never associated with the CLOB backend" in out
+    assert "deploy_deposit_wallet" in out
+
+
+def test_funded_and_clob_visible_is_green(setup, capsys):
+    """Both sides positive: on-chain pUSD and CLOB collateral."""
+    setup(sig="3", funder=FUNDER, balances={3: 87.65})
+    assert doctor.main([]) == 0
+    out = capsys.readouterr().out
+    assert "funder holds USDC on-chain: 50.00 pUSD" in out
+    assert "87.65 USDC" in out
+
+
+def test_owner_revert_is_warn_not_red(setup, capsys):
+    """A funder whose owner() reverts (ERC-1167/ERC-1967 generations) must
+    not fail as 'wrong key'; the CLOB collateral check stays the authority."""
+    setup(sig="3", funder=FUNDER, rpc=rpc_mock(owner=None), balances={3: 87.65})
+    assert doctor.main([]) == 0
+    out = capsys.readouterr().out
+    assert "[??] funder wallet on-chain" in out
+    assert "owner() not readable" in out
+    assert "ERC-1167 minimal proxy, the deposit wallet shape" in out
+    assert "NOT owned" not in out
+    assert "matches the wallet type" not in out  # no sig advice without owner
+
+
+def test_owner_revert_on_fat_contract_is_still_warn(setup, capsys):
+    setup(sig="3", funder=FUNDER, rpc=rpc_mock(code="0x" + "ab" * 300, owner=None),
+          balances={3: 5.0})
+    assert doctor.main([]) == 0
+    out = capsys.readouterr().out
+    assert "[??] funder wallet on-chain" in out
+    assert "a full contract, not a minimal proxy" in out
+
+
+def test_owner_someone_else_stays_red(setup, capsys):
+    """Only a DIFFERENT owner() answer is a red; pinned next to the warn
+    cases so the tri-state cannot regress."""
+    setup(sig="3", funder=FUNDER, rpc=rpc_mock(owner=OTHER), balances={3: 5.0})
+    assert doctor.main([]) == 1
+    out = capsys.readouterr().out
+    assert "NOT owned" in out
+    assert "[??] funder wallet on-chain" not in out
+
+
+def test_api_key_line_names_the_eoa_and_the_400(setup, capsys):
+    setup(sig="3", funder=FUNDER, balances={3: 87.65})
+    assert doctor.main([]) == 0
+    out = capsys.readouterr().out
+    assert f"api key registered for EOA {EOA}" in out
+    assert "400 from create is non fatal by construction" in out
+
+
+def test_api_key_listing_failure_is_red(setup, capsys):
+    setup(sig="3", funder=FUNDER, balances={3: 87.65})
+    FakeExecutor.api_keys = RuntimeError("401 Unauthorized")
+    assert doctor.main([]) == 1
+    assert "api key listing (L2 auth)" in capsys.readouterr().out
+
+
+def test_signer_note_printed_under_sig3_only(setup, capsys):
+    setup(sig="3", funder=FUNDER, balances={3: 87.65})
+    assert doctor.main([]) == 0
+    out = capsys.readouterr().out
+    assert 'signer must be the address of the API KEY' in out
+    assert "never posts an order" in out
+    setup(sig="0", balances={0: 10.0})
+    assert doctor.main([]) == 0
+    assert "signer must be the address" not in capsys.readouterr().out
+
+
+def test_probe_skips_sig_types_whose_executor_fails(setup, capsys):
+    """A signature type whose executor cannot even be built is skipped, and
+    the probe still names the one that sees the funds."""
+    setup(sig="0", funder=FUNDER, balances={3: 9.5})
+    FakeExecutor.raise_for = frozenset({1, 2})
+    assert doctor.main([]) == 1
+    assert "but sig_type=3 sees 9.50 USDC" in capsys.readouterr().out
+
+
+def test_executor_constructor_failure_is_a_clob_red(setup, capsys):
+    setup(sig="3", funder=FUNDER, balances={3: 50.0})
+    FakeExecutor.raise_for = frozenset({3})
+    assert doctor.main([]) == 1
+    assert "CLOB auth/collateral" in capsys.readouterr().out
+
+
+def test_rpc_failure_without_funder_is_never_green_either(setup, capsys):
+    """The self-funded (EOA) path now reads the on-chain balance too, and a
+    dead RPC must fail the run, same as the funder-contract path."""
+    def down(method, params):
+        raise RuntimeError("all RPCs unreachable")
+    setup(sig="0", rpc=down, balances={0: 10.0})
+    assert doctor.main([]) == 1
+    assert "RPC" in capsys.readouterr().out
 
 
 GAMMA_MARKET = {"conditionId": "0xc0nd", "slug": "btc-updown-15m-1751550300",
