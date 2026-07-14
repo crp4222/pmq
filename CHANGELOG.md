@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.1 (2026-07-14)
+
+* `pmq-doctor`: separate "funder holds no USDC on-chain" (deposit first, or
+  wrong funder) from "funder funded but the CLOB sees zero" (wrong
+  signature_type, or the wallet not associated), probing the signature types
+  and naming the one that sees the balance. A funder whose `owner()` reverts
+  or is unreadable is now a warning, not a wrong-key error (some deposit-wallet
+  proxy generations do not expose it); only a different owner stays red. The
+  api-key line prints the EOA the derived key resolves to and states the create
+  400 is non-fatal by construction (the key already exists and derive returns
+  it). Under signature_type 3 it notes the order signer is the deposit wallet
+  while the api key is the EOA, and that order authorization needs the backend
+  to know the pair. Read-only throughout, no order ever placed.
+
 ## 0.7.0 (2026-07-10)
 
 * MCP: `pmq_status` reports the active mode, registered trading surface,
